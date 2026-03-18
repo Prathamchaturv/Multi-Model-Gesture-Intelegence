@@ -22,6 +22,9 @@ build/
 .coverage
 htmlcov/
 
+# Runtime logs
+logs/*.log
+
 # IDE / editor
 .vscode/
 .idea/

@@ -19,21 +19,22 @@
 ## Table of Contents
 
 1. [Overview](#1--overview)
-2. [Screenshots](#2--screenshots)
-3. [Features](#3--features)
-4. [Architecture](#4--architecture)
-5. [Project Structure](#5--project-structure)
-6. [Technology Stack](#6--technology-stack)
-7. [Installation](#7--installation)
-8. [How to Run](#8--how-to-run)
-9. [Gesture Reference](#9--gesture-reference)
-10. [Testing](#10--testing)
-11. [Performance Metrics](#11--performance-metrics)
-12. [Privacy & Security](#12--privacy--security)
-13. [Innovation Highlights](#13--innovation-highlights)
-14. [Future Scope](#14--future-scope)
-15. [Author](#15--author)
-16. [License](#16--license)
+2. [Project Context](#project-context)
+3. [Screenshots](#2--screenshots)
+4. [Features](#3--features)
+5. [Architecture](#4--architecture)
+6. [Project Structure](#5--project-structure)
+7. [Technology Stack](#6--technology-stack)
+8. [Installation](#7--installation)
+9. [How to Run](#8--how-to-run)
+10. [Gesture Reference](#9--gesture-reference)
+11. [Testing](#10--testing)
+12. [Performance Metrics](#11--performance-metrics)
+13. [Privacy & Security](#12--privacy--security)
+14. [Innovation Highlights](#13--innovation-highlights)
+15. [Future Scope](#14--future-scope)
+16. [Author](#15--author)
+17. [License](#16--license)
 
 ---
 
@@ -63,6 +64,20 @@ PyQt6 dashboard are implemented as clearly separated, independently testable lay
 - **Rule-based architecture** — all decision logic is explicit, readable, and auditable
 - **Safety-gated activation** — the system requires a deliberate hold gesture before
   executing any actions, preventing accidental triggers
+
+## Project Context
+
+This project was developed individually as a full-stack AI desktop system focused on
+real-time gesture recognition and touch-free human-computer interaction.
+
+The codebase intentionally keeps perception, decision logic, system control, and UI in
+separate modules so each part can be tested and improved independently. The implementation
+emphasizes deterministic behavior, low-latency feedback, and practical desktop safety
+controls (activation gates, cooldowns, and confidence-based filtering).
+
+Development has been iterative: features such as gesture remapping, runtime logging,
+mode-switch stability, and authentication hardening were added in small increments and
+validated with tests to keep behavior predictable.
 
 ---
 

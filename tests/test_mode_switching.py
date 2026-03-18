@@ -12,6 +12,8 @@ Run:
 
 import sys
 import time
+import json
+import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -119,6 +121,37 @@ class TestDecisionEngineModeSwitching(unittest.TestCase):
     def test_unknown_gesture_returns_none_action(self) -> None:
         action, _ = self.engine.process('Unknown')
         self.assertIsNone(action)
+
+    def test_hot_reload_updates_action_mapping_without_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / 'gesture_map.json'
+
+            initial = {
+                'mode_switch': {'Three Fingers': 'next_mode'},
+                'App Mode': {'One Finger': 'open_brave'},
+                'Media Mode': {},
+                'System Mode': {},
+            }
+            updated = {
+                'mode_switch': {'Three Fingers': 'next_mode'},
+                'App Mode': {'One Finger': 'open_apple_music'},
+                'Media Mode': {},
+                'System Mode': {},
+            }
+
+            with open(cfg_path, 'w', encoding='utf-8') as fh:
+                json.dump(initial, fh)
+
+            eng = DecisionEngine(config_path=cfg_path)
+            self.assertEqual(eng.get_action('One Finger', 'App Mode'), 'open_brave')
+
+            time.sleep(0.6)
+            with open(cfg_path, 'w', encoding='utf-8') as fh:
+                json.dump(updated, fh)
+
+            time.sleep(0.6)
+            eng.process(None)  # trigger reload check
+            self.assertEqual(eng.get_action('One Finger', 'App Mode'), 'open_apple_music')
 
 
 # ---------------------------------------------------------------------------

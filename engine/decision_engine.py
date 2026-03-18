@@ -115,7 +115,11 @@ class DecisionEngine:
         # Resolve config path
         if config_path is None:
             config_path = Path(__file__).parent.parent / 'config' / 'gesture_map.json'
-        self._load_map(Path(config_path))
+        self._config_path = Path(config_path)
+        self._last_map_mtime: float | None = None
+        self._last_reload_check: float = 0.0
+        self._reload_check_interval_seconds: float = 0.5
+        self._load_map(self._config_path)
 
     # ------------------------------------------------------------------
     # Primary public API
@@ -131,6 +135,8 @@ class DecisionEngine:
             action       – action string to execute, or None
             mode_changed – True if the mode just switched this frame
         """
+        self._maybe_reload_map()
+
         if gesture is None:
             self._reset_stability()
             return None, False
@@ -235,6 +241,23 @@ class DecisionEngine:
         self._stable_count   = 0
         self._hold_start     = 0.0
 
+    def _maybe_reload_map(self) -> None:
+        """Hot-reload gesture_map.json when its modified timestamp changes."""
+        now = time.time()
+        if now - self._last_reload_check < self._reload_check_interval_seconds:
+            return
+
+        self._last_reload_check = now
+        try:
+            current_mtime = self._config_path.stat().st_mtime
+        except FileNotFoundError:
+            current_mtime = None
+        except Exception:
+            return
+
+        if self._last_map_mtime != current_mtime:
+            self._load_map(self._config_path)
+
     # ------------------------------------------------------------------
     # Config loading (private)
     # ------------------------------------------------------------------
@@ -245,12 +268,19 @@ class DecisionEngine:
         try:
             with open(path, 'r', encoding='utf-8') as fh:
                 data = json.load(fh)
+            try:
+                self._last_map_mtime = path.stat().st_mtime
+            except Exception:
+                self._last_map_mtime = None
             print(f'[DecisionEngine] Loaded gesture map from {path}')
         except FileNotFoundError:
+            self._last_map_mtime = None
             print(f'[DecisionEngine] gesture_map.json not found — using built-in defaults')
         except (json.JSONDecodeError, KeyError) as exc:
+            self._last_map_mtime = None
             print(f'[DecisionEngine] Warning: could not parse gesture map: {exc} — using defaults')
         except Exception as exc:
+            self._last_map_mtime = None
             print(f'[DecisionEngine] Warning: {exc} — using defaults')
 
         defaults = self._DEFAULT_MAPS

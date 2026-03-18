@@ -1094,12 +1094,31 @@ class GestureMapPanel(QWidget):
         title.setStyleSheet(
             f'color: {ACCENT}; font-size: 16px; font-weight: 700; letter-spacing: 2px;'
         )
-        subtitle = QLabel('Select a new action from the dropdown and press Save to reassign a gesture.')
+        subtitle = QLabel('Gesture | Assigned Action | Edit. Click Edit to choose a new action and save.')
         subtitle.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px;')
         hdr.addWidget(title)
         hdr.addStretch()
         hdr.addWidget(subtitle)
         root.addLayout(hdr)
+
+        # Column header row
+        header_row = QFrame()
+        header_row.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
+        )
+        header_lay = QHBoxLayout(header_row)
+        header_lay.setContentsMargins(16, 8, 12, 8)
+        header_lay.setSpacing(12)
+        for text, width in [('Gesture', 180), ('Assigned Action', 220), ('Edit', 80)]:
+            lbl = QLabel(text)
+            lbl.setFixedWidth(width)
+            lbl.setStyleSheet(
+                f'color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px; '
+                f'background: transparent; border: none;'
+            )
+            header_lay.addWidget(lbl)
+        header_lay.addStretch()
+        root.addWidget(header_row)
 
         # Scrollable table area ─────────────────────────────────────────
         scroll = QScrollArea()
@@ -1160,19 +1179,23 @@ class GestureMapPanel(QWidget):
         lay.setSpacing(12)
 
         gesture_lbl = QLabel(gesture)
-        gesture_lbl.setFixedWidth(140)
+        gesture_lbl.setFixedWidth(180)
         gesture_lbl.setStyleSheet(
             f'color: {TEXT_PRI}; font-size: 13px; background: transparent; border: none;'
         )
 
-        arrow = QLabel('→')
-        arrow.setStyleSheet(f'color: {TEXT_HINT}; font-size: 14px; background: transparent; border: none;')
+        action_lbl = QLabel(_ACTION_DISPLAY_LABELS.get(current_action, current_action))
+        action_lbl.setFixedWidth(220)
+        action_lbl.setStyleSheet(
+            f'color: {TEXT_SEC}; font-size: 12px; background: transparent; border: none;'
+        )
 
         combo = QComboBox()
+        combo.setFixedWidth(220)
         combo.setStyleSheet(f"""
             QComboBox {{
                 background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
-                border-radius: 6px; padding: 4px 10px; font-size: 12px; min-width: 160px;
+                border-radius: 6px; padding: 4px 10px; font-size: 12px; min-width: 180px;
             }}
             QComboBox::drop-down {{ border: none; padding-right: 6px; }}
             QComboBox:hover {{ border-color: {ACCENT}; }}
@@ -1187,6 +1210,7 @@ class GestureMapPanel(QWidget):
         idx = combo.findText(current_display)
         if idx >= 0:
             combo.setCurrentIndex(idx)
+        combo.setVisible(False)
 
         saved_lbl = QLabel('✓ Saved')
         saved_lbl.setStyleSheet(
@@ -1194,10 +1218,10 @@ class GestureMapPanel(QWidget):
         )
         saved_lbl.setVisible(False)
 
-        save_btn = QPushButton('Save')
-        save_btn.setFixedSize(64, 30)
-        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        save_btn.setStyleSheet(f"""
+        edit_btn = QPushButton('Edit')
+        edit_btn.setFixedSize(64, 30)
+        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        edit_btn.setStyleSheet(f"""
             QPushButton {{
                 background: rgba(0,229,255,0.12); color: {ACCENT}; border: 1px solid {ACCENT};
                 border-radius: 6px; font-size: 12px; font-weight: 600;
@@ -1205,20 +1229,68 @@ class GestureMapPanel(QWidget):
             QPushButton:hover {{ background: rgba(0,229,255,0.28); }}
         """)
 
+        save_btn = QPushButton('Save')
+        save_btn.setFixedSize(64, 30)
+        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0,255,136,0.12); color: {ACTIVE}; border: 1px solid {ACTIVE};
+                border-radius: 6px; font-size: 12px; font-weight: 600;
+            }}
+            QPushButton:hover {{ background: rgba(0,255,136,0.24); }}
+        """)
+        save_btn.setVisible(False)
+
+        cancel_btn = QPushButton('Cancel')
+        cancel_btn.setFixedSize(68, 30)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {TEXT_SEC}; border: 1px solid {BORDER};
+                border-radius: 6px; font-size: 12px; font-weight: 600;
+            }}
+            QPushButton:hover {{ border-color: {TEXT_PRI}; color: {TEXT_PRI}; }}
+        """)
+        cancel_btn.setVisible(False)
+
+        def _start_edit():
+            action_lbl.setVisible(False)
+            combo.setVisible(True)
+            edit_btn.setVisible(False)
+            save_btn.setVisible(True)
+            cancel_btn.setVisible(True)
+
+        def _cancel_edit():
+            idx_local = combo.findText(action_lbl.text())
+            if idx_local >= 0:
+                combo.setCurrentIndex(idx_local)
+            combo.setVisible(False)
+            action_lbl.setVisible(True)
+            save_btn.setVisible(False)
+            cancel_btn.setVisible(False)
+            edit_btn.setVisible(True)
+
         def _on_save(m=mode, g=gesture, c=combo, sl=saved_lbl):
             selected_display = c.currentText()
             action_key = _ACTION_KEY_FROM_LABEL.get(selected_display, selected_display)
             self._save_mapping(m, g, action_key)
+            action_lbl.setText(selected_display)
             sl.setVisible(True)
             QTimer.singleShot(1500, lambda: sl.setVisible(False))
+            _cancel_edit()
 
+        edit_btn.clicked.connect(_start_edit)
         save_btn.clicked.connect(_on_save)
+        cancel_btn.clicked.connect(_cancel_edit)
 
         lay.addWidget(gesture_lbl)
-        lay.addWidget(arrow)
-        lay.addWidget(combo, stretch=1)
-        lay.addWidget(saved_lbl)
+        lay.addWidget(action_lbl)
+        lay.addWidget(combo)
+        lay.addWidget(edit_btn)
         lay.addWidget(save_btn)
+        lay.addWidget(cancel_btn)
+        lay.addStretch()
+        lay.addWidget(saved_lbl)
         return row
 
     def _save_mapping(self, mode: str, gesture: str, action: str) -> None:

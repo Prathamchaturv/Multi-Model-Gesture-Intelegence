@@ -176,12 +176,10 @@ gesture is interpreted.
 
 ### 3.8 Custom Gesture Mapping
 
-- **Gestures sidebar tab** displays a full table of all configurable gesture→action mappings
-  organised by mode (App / Media / System)
-- Each row shows the gesture name, a dropdown of available actions, and a **Save** button
-- Changes are written back to `config/gesture_map.json` immediately
-- The pipeline, ModeCard, and Gesture Guide panel all read from that file dynamically — no
-  restart required after saving
+- **Gestures sidebar tab** displays a table-style editor with columns: **Gesture | Assigned Action | Edit**
+- Clicking **Edit** switches the row into edit mode, revealing an action dropdown plus Save/Cancel
+- Updated mappings are written back to `config/gesture_map.json` immediately
+- `DecisionEngine` hot-reloads file changes at runtime, so new mappings execute without restarting
 
 ---
 

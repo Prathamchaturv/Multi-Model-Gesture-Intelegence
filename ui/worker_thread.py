@@ -29,6 +29,7 @@ error(str)           – fatal pipeline error message
 from __future__ import annotations
 
 import time
+from collections import deque
 from datetime import datetime
 
 import cv2
@@ -63,6 +64,58 @@ _MODE_COLOURS = {
     'Media Mode':  (0, 200, 255),    # sky
     'System Mode': (120, 100, 255),  # violet
 }
+
+
+class GestureStabilityFilter:
+    """Smooth raw frame-wise gestures into stable confirmed gestures."""
+
+    def __init__(
+        self,
+        confirm_frames: int = 4,
+        min_switch_interval_s: float = 0.25,
+    ) -> None:
+        self._confirm_frames = max(3, int(confirm_frames))
+        self._min_switch_interval_s = float(min_switch_interval_s)
+        self._recent: deque[str] = deque(maxlen=self._confirm_frames)
+        self._last_confirmed: str | None = None
+        self._last_confirmed_change_ts: float = 0.0
+
+    def update(self, raw_gesture: str | None, hand_present: bool) -> tuple[str | None, str]:
+        """
+        Returns:
+            (confirmed_gesture, status)
+            status in {'stable', 'unclear', 'no_hand'}
+        """
+        if not hand_present:
+            self._recent.clear()
+            self._last_confirmed = None
+            return None, 'no_hand'
+
+        if not raw_gesture:
+            self._recent.clear()
+            self._last_confirmed = None
+            return None, 'unclear'
+
+        self._recent.append(raw_gesture)
+        if len(self._recent) < self._confirm_frames:
+            return None, 'unclear'
+
+        if len(set(self._recent)) != 1:
+            return None, 'unclear'
+
+        candidate = self._recent[-1]
+        now = time.time()
+
+        # Debounce rapid switches between different gestures.
+        if self._last_confirmed and candidate != self._last_confirmed:
+            if now - self._last_confirmed_change_ts < self._min_switch_interval_s:
+                return None, 'unclear'
+
+        if candidate != self._last_confirmed:
+            self._last_confirmed = candidate
+            self._last_confirmed_change_ts = now
+
+        return candidate, 'stable'
 
 def _ts() -> str:
     return datetime.now().strftime('%H:%M:%S')
@@ -181,6 +234,7 @@ class WorkerThread(QThread):
             air_mouse   = AirMouseController()
             _prev_mode  = decision_engine.current_mode
             fps_counter = FPSCounter()
+            gesture_filter = GestureStabilityFilter(confirm_frames=4, min_switch_interval_s=0.25)
             last_logged_gesture: str | None = None
             last_no_hand_log = 0.0
             last_low_conf_log = 0.0
@@ -213,6 +267,7 @@ class WorkerThread(QThread):
 
                 gesture: str | None = None
                 confidence          = 0.0
+                ui_gesture_text = 'Gesture unclear'
 
                 # Prefer right hand; fall back to left
                 hand_data = hands_info.get('right') or hands_info.get('left')
@@ -220,26 +275,40 @@ class WorkerThread(QThread):
                     confidence = float(hand_data.get('confidence', 0.0))
 
                     if confidence < low_conf_threshold:
+                        gesture, _ = gesture_filter.update(None, hand_present=True)
+                        ui_gesture_text = 'Gesture unclear'
+                        last_logged_gesture = None
                         now = time.time()
                         if now - last_low_conf_log >= warning_interval:
                             runtime_logger.warning('Low confidence gesture (confidence=%.2f)', confidence)
                             last_low_conf_log = now
                     else:
                         finger_states = hand_data['finger_states']
-                        gesture = gesture_classifier.classify(finger_states)
-                        if gesture == 'Unknown':
+                        raw_gesture = gesture_classifier.classify(finger_states)
+                        if raw_gesture == 'Unknown':
+                            gesture, _ = gesture_filter.update(None, hand_present=True)
+                            ui_gesture_text = 'Gesture unclear'
+                            last_logged_gesture = None
                             now = time.time()
                             if now - last_invalid_log >= error_interval:
                                 runtime_logger.error('Invalid gesture detected')
                                 last_invalid_log = now
-                            gesture = None
-                        elif gesture != last_logged_gesture:
-                            runtime_logger.info('Gesture detected: %s', gesture)
-                            last_logged_gesture = gesture
+                        else:
+                            gesture, stable_state = gesture_filter.update(raw_gesture, hand_present=True)
+                            if stable_state == 'stable' and gesture is not None:
+                                ui_gesture_text = gesture
+                                if gesture != last_logged_gesture:
+                                    runtime_logger.info('Gesture detected: %s', gesture)
+                                    last_logged_gesture = gesture
+                            else:
+                                ui_gesture_text = 'Gesture unclear'
+                                last_logged_gesture = None
 
                     # Draw hand skeleton
                     hand_tracker.draw_landmarks(frame, detection_result)
                 else:
+                    gesture, _ = gesture_filter.update(None, hand_present=False)
+                    ui_gesture_text = 'No hand detected'
                     now = time.time()
                     if now - last_no_hand_log >= error_interval:
                         runtime_logger.error('No hand detected')
@@ -298,7 +367,7 @@ class WorkerThread(QThread):
                 fps_counter.update()
                 latency_ms = (time.perf_counter() - t_start) * 1000
 
-                state.set_gesture(gesture or '')
+                state.set_gesture(ui_gesture_text)
                 state.set_confidence(confidence)
                 state.set_fps(fps_counter.fps)
                 state.set_latency(latency_ms)

@@ -283,10 +283,10 @@ MMGI/
 ├── utils/
 │   ├── config.py                  # Dot-key JSON config loader
 │   ├── fps_counter.py             # Rolling-window FPS counter
-│   └── logger.py                  # Performance logger → logs/mmgi_performance.log
+│   └── logger.py                  # Async runtime logger → logs/mmgi.log
 │
 ├── logs/
-│   └── mmgi_performance.log       # Auto-created; records gesture + latency + action
+│   └── mmgi.log                   # Auto-created; gesture, action, warning, and error events
 │
 ├── tests/
 │   ├── test_gesture_classifier.py # Unit tests for GestureClassifier (14 cases)
@@ -476,24 +476,27 @@ Measured on a mid-range laptop (Intel Core i5, integrated webcam, no GPU acceler
 
 > Performance varies with webcam resolution, CPU load, and ambient lighting quality.
 
-### Performance Log File
+### Runtime Log File
 
-Every executed action is recorded to **`logs/mmgi_performance.log`** (auto-created on first
-run). Each line captures:
+MMGI writes runtime telemetry to **`logs/mmgi.log`** using an asynchronous queue-based logger
+to avoid blocking the frame pipeline.
+
+Each log line follows this format:
 
 ```
-2026-03-12 14:23:01 | gesture='Two Fingers'  recognition_ms=38.4  action='volume_down'  mode='Media Mode'
+[18:09:49] INFO: Gesture detected: Two Fingers
+[18:09:49] INFO: Action executed: Open Music
+[18:09:50] WARNING: Low confidence gesture (confidence=0.58)
+[18:09:51] ERROR: No hand detected
 ```
 
-Log fields:
+Event categories recorded:
 
-| Field | Description |
+| Level | Event |
 |---|---|
-| timestamp | Wall-clock time of the event (`YYYY-MM-DD HH:MM:SS`) |
-| `gesture` | Recognised gesture name that triggered the action |
-| `recognition_ms` | End-to-end pipeline latency from frame start to action dispatch |
-| `action` | Action key that was executed (e.g. `volume_up`, `open_brave`) |
-| `mode` | Active Smart Mode at the time of execution |
+| `INFO` | Gesture detected, action executed, pipeline start/stop |
+| `WARNING` | Low confidence gesture |
+| `ERROR` | No hand detected, invalid gesture, pipeline execution errors |
 
 ---
 

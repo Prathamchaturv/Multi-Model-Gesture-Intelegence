@@ -1,36 +1,76 @@
 """
 Module: logger.py
-Description: Performance logging utility — creates a file-based logger that
-             records gesture recognition events to logs/mmgi_performance.log.
-Author: Pratham Chaturvedi
+Description: Asynchronous logging utilities for MMGI runtime events.
+
+Creates logs/mmgi.log and writes gesture/action/error telemetry with a
+non-blocking QueueHandler + QueueListener setup to avoid pipeline slowdowns.
 """
 
+from __future__ import annotations
+
+import atexit
 import logging
+import logging.handlers
 from pathlib import Path
+from queue import Queue
 
-_perf_logger: logging.Logger | None = None
+_mmgi_logger: logging.Logger | None = None
+_log_listener: logging.handlers.QueueListener | None = None
 
 
-def get_performance_logger() -> logging.Logger:
-    """Return the singleton performance logger, initialising on first call."""
-    global _perf_logger
-    if _perf_logger is not None:
-        return _perf_logger
+def _build_mmgi_logger() -> logging.Logger:
+    """Initialise and return the process-wide asynchronous MMGI logger."""
+    global _log_listener
 
     log_dir = Path(__file__).parent.parent / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / 'mmgi_performance.log'
+    log_file = log_dir / 'mmgi.log'
 
-    _perf_logger = logging.getLogger('mmgi.performance')
-    _perf_logger.setLevel(logging.INFO)
-    _perf_logger.propagate = False
+    logger = logging.getLogger('mmgi.runtime')
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
-    if not _perf_logger.handlers:
-        fh = logging.FileHandler(str(log_file), encoding='utf-8')
-        fh.setFormatter(logging.Formatter(
-            '%(asctime)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
-        ))
-        _perf_logger.addHandler(fh)
+    if logger.handlers:
+        return logger
 
-    return _perf_logger
+    record_queue: Queue = Queue(-1)
+    queue_handler = logging.handlers.QueueHandler(record_queue)
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        str(log_file),
+        maxBytes=2 * 1024 * 1024,
+        backupCount=3,
+        encoding='utf-8',
+    )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter('[%(asctime)s] %(levelname)s: %(message)s', datefmt='%H:%M:%S')
+    )
+
+    _log_listener = logging.handlers.QueueListener(record_queue, file_handler, respect_handler_level=True)
+    _log_listener.start()
+    atexit.register(_stop_listener)
+
+    logger.addHandler(queue_handler)
+    return logger
+
+
+def _stop_listener() -> None:
+    """Stop the background queue listener during process shutdown."""
+    global _log_listener
+    if _log_listener is not None:
+        _log_listener.stop()
+        _log_listener = None
+
+
+def get_mmgi_logger() -> logging.Logger:
+    """Return singleton logger for runtime events and errors."""
+    global _mmgi_logger
+    if _mmgi_logger is None:
+        _mmgi_logger = _build_mmgi_logger()
+    return _mmgi_logger
+
+
+def get_performance_logger() -> logging.Logger:
+    """Backward-compatible alias retained for existing callers."""
+    return get_mmgi_logger()

@@ -44,7 +44,7 @@ from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
 from utils.fps_counter           import FPSCounter
 from utils.config                import Config
-from utils.logger                import get_performance_logger
+from utils.logger                import get_mmgi_logger
 from ui.shared_state             import SharedState
 
 
@@ -145,6 +145,8 @@ class WorkerThread(QThread):
 
         try:
             config = Config()
+            runtime_logger = get_mmgi_logger()
+            low_conf_threshold = float(config.get('hand_tracking.min_detection_confidence'))
 
             camera = Camera(
                 width  = config.get('camera.width'),
@@ -179,8 +181,16 @@ class WorkerThread(QThread):
             air_mouse   = AirMouseController()
             _prev_mode  = decision_engine.current_mode
             fps_counter = FPSCounter()
+            last_logged_gesture: str | None = None
+            last_no_hand_log = 0.0
+            last_low_conf_log = 0.0
+            last_invalid_log = 0.0
+
+            warning_interval = 1.5
+            error_interval = 1.5
 
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
+            runtime_logger.info('Pipeline started')
 
             # ----------------------------------------------------------------
             # Frame loop
@@ -207,15 +217,34 @@ class WorkerThread(QThread):
                 # Prefer right hand; fall back to left
                 hand_data = hands_info.get('right') or hands_info.get('left')
                 if hand_data:
-                    finger_states = hand_data['finger_states']
-                    gesture       = gesture_classifier.classify(finger_states)
-                    confidence    = 1.0   # classifier is rule-based, always 1.0 on match
-                    if gesture == 'Unknown':
-                        gesture    = None
-                        confidence = 0.0
+                    confidence = float(hand_data.get('confidence', 0.0))
+
+                    if confidence < low_conf_threshold:
+                        now = time.time()
+                        if now - last_low_conf_log >= warning_interval:
+                            runtime_logger.warning('Low confidence gesture (confidence=%.2f)', confidence)
+                            last_low_conf_log = now
+                    else:
+                        finger_states = hand_data['finger_states']
+                        gesture = gesture_classifier.classify(finger_states)
+                        if gesture == 'Unknown':
+                            now = time.time()
+                            if now - last_invalid_log >= error_interval:
+                                runtime_logger.error('Invalid gesture detected')
+                                last_invalid_log = now
+                            gesture = None
+                        elif gesture != last_logged_gesture:
+                            runtime_logger.info('Gesture detected: %s', gesture)
+                            last_logged_gesture = gesture
 
                     # Draw hand skeleton
                     hand_tracker.draw_landmarks(frame, detection_result)
+                else:
+                    now = time.time()
+                    if now - last_no_hand_log >= error_interval:
+                        runtime_logger.error('No hand detected')
+                        last_no_hand_log = now
+                    last_logged_gesture = None
 
                 # ----------------------------------------------------------
                 # Smart Mode decision
@@ -255,19 +284,13 @@ class WorkerThread(QThread):
                         )
                         if am_label:
                             state.emit_log(_ts(), 'ACTION', f'{am_label}  [System Mode]')
+                            runtime_logger.info('Action executed: %s', am_label)
                 elif should_execute and action:
                     action_executor.execute(action)
                     label = action_executor._LABELS.get(action, action)
                     state.emit_log(_ts(), 'ACTION', f'{label}  [{decision_engine.current_mode}]')
                     state.set_action_executed(action)
-                    # ---- performance log ----
-                    _perf = get_performance_logger()
-                    _perf.info(
-                        f'gesture={gesture!r}  '
-                        f'recognition_ms={(time.perf_counter() - t_start) * 1000:.1f}  '
-                        f'action={action!r}  '
-                        f'mode={decision_engine.current_mode!r}'
-                    )
+                    runtime_logger.info('Action executed: %s', label)
 
                 # ----------------------------------------------------------
                 # Update telemetry
@@ -298,11 +321,16 @@ class WorkerThread(QThread):
             hand_tracker.close()
             state.set_system_active(False)
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline stopped')
+            runtime_logger.info('Pipeline stopped')
 
         except Exception as exc:
             import traceback
             msg = f'Pipeline error: {exc}\n{traceback.format_exc()}'
             self.error.emit(msg)
+            try:
+                get_mmgi_logger().error('Pipeline error: %s', exc)
+            except Exception:
+                pass
             try:
                 if camera is not None:
                     camera.release()

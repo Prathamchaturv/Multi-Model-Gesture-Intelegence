@@ -115,6 +115,7 @@ class HandTracker:
             'landmarks'    : list of (x, y, z) normalised coords
             'finger_states': dict of finger→bool (True = extended)
             'handedness'   : 'Left' | 'Right'
+            'confidence'   : handedness score (0.0-1.0)
         """
         info: dict = {'count': 0, 'left': None, 'right': None}
 
@@ -132,6 +133,7 @@ class HandTracker:
                 'landmarks':     landmarks_tuple,
                 'finger_states': finger_states,
                 'handedness':    label,
+                'confidence':    float(getattr(handedness_list[0], 'score', 0.0) or 0.0),
             }
 
             info['count'] += 1

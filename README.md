@@ -124,7 +124,7 @@ gesture is interpreted.
 | System Mode | Three Fingers held 1 s | Air Mouse and cursor control |
 
 - **Mode switch trigger**: Three Fingers held continuously for 1 second (10-frame stability
-  gate + 1.5 s post-switch cooldown to prevent immediate re-trigger)
+  gate + 2.0 s post-switch cooldown to prevent immediate re-trigger)
 - **Visual feedback**: a stability progress bar in the dashboard fills during the hold and
   resets on release
 - **Conflict prevention**: no mode switch is processed during the cooldown window
@@ -175,7 +175,7 @@ gesture is interpreted.
 - Live camera feed panel with hand skeleton overlay and gesture label
 - Mode indicator in header and right panel, colour-coded by active mode
 - **Three active-mode indicator buttons** (APP / MEDIA / SYSTEM) highlight the current mode
-- **Mode change banner** — a 1.5-second notification displayed above the camera feed whenever
+- **Mode change banner** — a 1.8-second notification displayed above the camera feed whenever
   the mode switches (e.g. *Mode Changed → MEDIA MODE*)
 - **Gesture detection feedback bar** showing the last detected gesture and the last executed
   action in real-time below the camera
@@ -321,8 +321,8 @@ MMGI/
 │
 ├── tests/
 │   ├── test_gesture_classifier.py # Unit tests for GestureClassifier (14 cases)
-│   ├── test_mode_switching.py     # Unit tests for DecisionEngine (22 cases)
-│   └── test_action_executor.py    # Unit tests for ActionExecutor (15 cases)
+│   ├── test_mode_switching.py     # Unit tests for DecisionEngine (31 cases)
+│   └── test_action_executor.py    # Unit tests for ActionExecutor (16 cases)
 │
 └── assets/                        # Screenshots and diagrams
 ```
@@ -493,8 +493,8 @@ python -m pytest tests/test_mode_switching.py -v
 | Test File | Class Under Test | Cases | What is Verified |
 |---|---|---|---|
 | `test_gesture_classifier.py` | `GestureClassifier` | 14 | All 10 named gestures, edge cases, Unknown fallback |
-| `test_mode_switching.py` | `DecisionEngine`, `AirMouseController` | 23 | Mode transitions, stability gate, cooldown, hot-reload, action lookup |
-| `test_action_executor.py` | `ActionExecutor` | 15 | Label completeness, action dispatch, feedback, edge cases |
+| `test_mode_switching.py` | `DecisionEngine`, `AirMouseController` | 31 | Mode transitions, stability gate, cooldown, debounce, hot-reload, action lookup |
+| `test_action_executor.py` | `ActionExecutor` | 16 | Label completeness, action dispatch, cooldown behavior, feedback, edge cases |
 | `test_logging.py` | `utils.logger` | 1 | Runtime log file creation and write path validation |
 
 ---
@@ -514,7 +514,7 @@ Measured on a mid-range laptop (Intel Core i5, integrated webcam, no GPU acceler
 | Activation hold | 2 000 ms | Required Open Palm hold duration |
 | Mode switch hold | 1 000 ms | Required Three-Finger hold duration |
 | Click cooldown | 500 ms | Prevents click spam on held gestures |
-| Mode switch cooldown | 1 500 ms | Prevents immediate re-trigger after switch |
+| Mode switch cooldown | 2 000 ms | Prevents immediate re-trigger after switch |
 
 > Performance varies with webcam resolution, CPU load, and ambient lighting quality.
 

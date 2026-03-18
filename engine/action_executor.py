@@ -26,7 +26,7 @@ import os
 import time
 import subprocess
 import cv2
-from utils.logger import get_mmgi_logger
+from utils.logger import log_runtime_error
 
 try:
     import pyautogui
@@ -84,7 +84,6 @@ class ActionExecutor:
         self._last_global_action_time: float = 0.0
         # Per-action cooldown tracking: action → timestamp of last execution
         self._last_executed: dict[str, float] = {}
-        self._logger = get_mmgi_logger()
 
     # ------------------------------------------------------------------
     # Public API
@@ -122,11 +121,11 @@ class ActionExecutor:
 
             else:
                 print(f'  [ActionExecutor] Unknown action: {action}')
-                self._logger.error('Unknown action key: %s', action)
+                log_runtime_error(f'Unknown action key: {action}')
 
         except Exception as exc:
             print(f'  [ActionExecutor] Error executing "{action}": {exc}')
-            self._logger.error('Action execution failed for %s: %s', action, exc)
+            log_runtime_error(f'Action execution failed for {action}: {exc}')
 
     def display_action(self, frame):
         """Render a fading action-feedback banner at the bottom of the frame."""

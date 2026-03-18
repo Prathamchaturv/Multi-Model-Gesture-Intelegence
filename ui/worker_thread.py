@@ -45,7 +45,14 @@ from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
 from utils.fps_counter           import FPSCounter
 from utils.config                import Config
-from utils.logger                import get_mmgi_logger
+from utils.logger                import (
+    get_mmgi_logger,
+    log_action_executed,
+    log_gesture_detected,
+    log_low_confidence,
+    log_pipeline_state,
+    log_runtime_error,
+)
 from ui.shared_state             import SharedState
 
 
@@ -198,7 +205,7 @@ class WorkerThread(QThread):
 
         try:
             config = Config()
-            runtime_logger = get_mmgi_logger()
+            get_mmgi_logger()  # ensure logger is initialized once on worker start
             low_conf_threshold = float(config.get('hand_tracking.min_detection_confidence'))
 
             camera = Camera(
@@ -244,7 +251,7 @@ class WorkerThread(QThread):
             error_interval = 1.5
 
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
-            runtime_logger.info('Pipeline started')
+            log_pipeline_state('Pipeline started')
 
             # ----------------------------------------------------------------
             # Frame loop
@@ -280,7 +287,7 @@ class WorkerThread(QThread):
                         last_logged_gesture = None
                         now = time.time()
                         if now - last_low_conf_log >= warning_interval:
-                            runtime_logger.warning('Low confidence gesture (confidence=%.2f)', confidence)
+                            log_low_confidence(confidence)
                             last_low_conf_log = now
                     else:
                         finger_states = hand_data['finger_states']
@@ -291,14 +298,14 @@ class WorkerThread(QThread):
                             last_logged_gesture = None
                             now = time.time()
                             if now - last_invalid_log >= error_interval:
-                                runtime_logger.error('Invalid gesture detected')
+                                log_runtime_error('Invalid gesture detected')
                                 last_invalid_log = now
                         else:
                             gesture, stable_state = gesture_filter.update(raw_gesture, hand_present=True)
                             if stable_state == 'stable' and gesture is not None:
                                 ui_gesture_text = gesture
                                 if gesture != last_logged_gesture:
-                                    runtime_logger.info('Gesture detected: %s', gesture)
+                                    log_gesture_detected(gesture)
                                     last_logged_gesture = gesture
                             else:
                                 ui_gesture_text = 'Gesture unclear'
@@ -311,7 +318,7 @@ class WorkerThread(QThread):
                     ui_gesture_text = 'No hand detected'
                     now = time.time()
                     if now - last_no_hand_log >= error_interval:
-                        runtime_logger.error('No hand detected')
+                        log_runtime_error('No hand detected')
                         last_no_hand_log = now
                     last_logged_gesture = None
 
@@ -353,13 +360,13 @@ class WorkerThread(QThread):
                         )
                         if am_label:
                             state.emit_log(_ts(), 'ACTION', f'{am_label}  [System Mode]')
-                            runtime_logger.info('Action executed: %s', am_label)
+                            log_action_executed(am_label)
                 elif should_execute and action:
                     action_executor.execute(action)
                     label = action_executor._LABELS.get(action, action)
                     state.emit_log(_ts(), 'ACTION', f'{label}  [{decision_engine.current_mode}]')
                     state.set_action_executed(action)
-                    runtime_logger.info('Action executed: %s', label)
+                    log_action_executed(label)
 
                 # ----------------------------------------------------------
                 # Update telemetry
@@ -390,14 +397,14 @@ class WorkerThread(QThread):
             hand_tracker.close()
             state.set_system_active(False)
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline stopped')
-            runtime_logger.info('Pipeline stopped')
+            log_pipeline_state('Pipeline stopped')
 
         except Exception as exc:
             import traceback
             msg = f'Pipeline error: {exc}\n{traceback.format_exc()}'
             self.error.emit(msg)
             try:
-                get_mmgi_logger().error('Pipeline error: %s', exc)
+                log_runtime_error(f'Pipeline error: {exc}')
             except Exception:
                 pass
             try:

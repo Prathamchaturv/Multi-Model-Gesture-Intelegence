@@ -207,6 +207,15 @@ gesture is interpreted.
 
 ## 4 · Architecture
 
+### System Architecture Diagram
+
+<p align="center">
+  <img src="assets/architecture.png" width="940" alt="MMGI system architecture diagram">
+</p>
+
+> The diagram summarizes how camera input flows through tracking, classification,
+> decision logic, execution, and UI synchronization.
+
 ### Pipeline
 
 ```
@@ -401,6 +410,14 @@ python main.py
 # Headless mode — OpenCV window only, no Qt
 python main.py --headless
 ```
+
+### Quick Usage Checklist
+
+1. Ensure webcam access is available to Python.
+2. Launch with `python main.py` and complete login when enabled.
+3. Hold **Open Palm** for 2 seconds to activate the controller.
+4. Hold **Three Fingers** for 1 second to switch App / Media / System modes.
+5. Use mode-specific gestures from the reference table below.
 
 ### Activation Sequence
 

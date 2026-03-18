@@ -468,6 +468,15 @@ class VisionPanel(QWidget):
         self._mode_btns['App Mode'].setStyleSheet(self._mode_btn_style('App Mode', active=True))
         root.addLayout(mode_row)
 
+        # Persistent current-mode label (always visible)
+        self._current_mode_label = QLabel('Current Mode: APP MODE')
+        self._current_mode_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._current_mode_label.setStyleSheet(
+            f'color: {MODE_APP}; font-size: 12px; font-weight: 700; letter-spacing: 1px; '
+            f'background: transparent; border: none;'
+        )
+        root.addWidget(self._current_mode_label)
+
         # ── Gesture detection feedback ────────────────────────────────
         feedback_frame = QFrame()
         feedback_frame.setStyleSheet(
@@ -528,9 +537,9 @@ class VisionPanel(QWidget):
         colour = _MODE_ACCENT.get(mode, ACCENT)
         if active:
             return (
-                f'QPushButton {{ background: rgba(0,229,255,0.15); color: {colour}; '
+                f'QPushButton {{ background: {colour}; color: {BG_DEEP}; '
                 f'border: 2px solid {colour}; border-radius: 8px; '
-                f'font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 0 10px; }}'
+                f'font-size: 10px; font-weight: 800; letter-spacing: 1px; padding: 0 10px; }}'
             )
         return (
             f'QPushButton {{ background: transparent; color: {TEXT_HINT}; '
@@ -565,19 +574,25 @@ class VisionPanel(QWidget):
         colour = _MODE_ACCENT.get(mode, ACCENT)
         short  = mode.replace(' Mode', '').upper() + ' MODE'
 
-        # Flash the mode change banner for 1.5 s
-        self._mode_banner.setText(f'Mode Changed  →  {short}')
+        # Flash the mode change banner for 1.8 s
+        self._mode_banner.setText(f'MODE CHANGED  →  {short}')
         self._mode_banner.setStyleSheet(
             f'background-color: rgba(0,229,255,0.15); color: {colour}; '
-            f'border: 1px solid {colour}; border-radius: 8px; '
-            f'font-size: 13px; font-weight: 700; letter-spacing: 2px;'
+            f'border: 2px solid {colour}; border-radius: 8px; '
+            f'font-size: 13px; font-weight: 800; letter-spacing: 2px;'
         )
         self._mode_banner.setVisible(True)
-        QTimer.singleShot(1500, lambda: self._mode_banner.setVisible(False))
+        QTimer.singleShot(1800, lambda: self._mode_banner.setVisible(False))
 
         # Highlight the active mode button
         for m, btn in self._mode_btns.items():
             btn.setStyleSheet(self._mode_btn_style(m, active=(m == mode)))
+
+        self._current_mode_label.setText(f'Current Mode: {short}')
+        self._current_mode_label.setStyleSheet(
+            f'color: {colour}; font-size: 12px; font-weight: 700; letter-spacing: 1px; '
+            f'background: transparent; border: none;'
+        )
 
         # Update camera frame border colour
         self._cam_frame.setStyleSheet(

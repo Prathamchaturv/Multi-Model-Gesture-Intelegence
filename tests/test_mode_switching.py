@@ -21,7 +21,7 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import unittest
-from engine.decision_engine     import DecisionEngine, MODES, DEFAULT_MODE, STABILITY_FRAMES, HOLD_SECONDS
+from engine.decision_engine     import DecisionEngine, MODES, DEFAULT_MODE, STABILITY_FRAMES, HOLD_SECONDS, COOLDOWN_SECONDS
 from core.system_mode_engine    import SystemModeEngine
 
 
@@ -103,6 +103,32 @@ class TestDecisionEngineModeSwitching(unittest.TestCase):
         # Immediate second switch attempt (no time elapsed → cooldown still active)
         force_switch(self.engine, 1000.0)
         self.assertEqual(self.engine.current_mode, mode_after_first)
+
+    def test_switch_debounce_requires_full_cooldown(self) -> None:
+        """Mode must not switch again until the 2-second cooldown has fully elapsed."""
+        eng = DecisionEngine()
+
+        with patch('engine.decision_engine.time') as mock_time:
+            # First successful switch to Media Mode
+            start = 100.0
+            for i in range(STABILITY_FRAMES + 1):
+                mock_time.time.return_value = start + i * 0.12
+                eng.process('Three Fingers')
+            self.assertEqual(eng.current_mode, 'Media Mode')
+
+            # Still inside cooldown window: should remain Media Mode
+            within_cooldown = start + HOLD_SECONDS + COOLDOWN_SECONDS - 0.05
+            for i in range(STABILITY_FRAMES + 1):
+                mock_time.time.return_value = within_cooldown + i * 0.12
+                eng.process('Three Fingers')
+            self.assertEqual(eng.current_mode, 'Media Mode')
+
+            # After cooldown: switch should be allowed to System Mode
+            after_cooldown = start + HOLD_SECONDS + COOLDOWN_SECONDS + 0.2
+            for i in range(STABILITY_FRAMES + 1):
+                mock_time.time.return_value = after_cooldown + i * 0.12
+                eng.process('Three Fingers')
+            self.assertEqual(eng.current_mode, 'System Mode')
 
     def test_stability_resets_on_gesture_change(self) -> None:
         self.engine.process('Three Fingers')

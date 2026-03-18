@@ -12,7 +12,7 @@ Implements a 3-mode (App / Media / System) gesture action resolver.
 Mode Switching
 --------------
 Hold Three Fingers for 1 second → cycles  App → Media → System → App
-(10-frame stability + 1.5 s cooldown before next switch)
+(10-frame stability + 2.0 s cooldown before next switch)
 
 One Finger and Two Fingers are now **free action gestures** in each mode
 and will never be intercepted as mode-switch triggers.
@@ -39,7 +39,7 @@ MODES            = ('App Mode', 'Media Mode', 'System Mode')
 DEFAULT_MODE     = 'App Mode'
 STABILITY_FRAMES = 10          # consecutive frames same gesture required
 HOLD_SECONDS     = 1.0         # seconds the gesture must be held
-COOLDOWN_SECONDS = 1.5         # seconds before next mode switch allowed
+COOLDOWN_SECONDS = 2.0         # seconds before next mode switch allowed
 
 # Whitelist of action strings that may appear in gesture_map.json.
 # Any action not in this set will be rejected during config loading.

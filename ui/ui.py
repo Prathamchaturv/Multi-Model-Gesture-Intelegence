@@ -852,6 +852,10 @@ class ModeCard(QFrame):
         )
         self._build_instructions(mode)
 
+    def refresh_current_mode(self) -> None:
+        """Refresh rows from gesture_map.json for whichever mode is currently active."""
+        self._build_instructions(self._state.current_mode)
+
 
 class PerformanceCard(QFrame):
     def __init__(self, state: SharedState, parent=None) -> None:
@@ -1271,7 +1275,7 @@ class GestureMapPanel(QWidget):
             cancel_btn.setVisible(False)
             edit_btn.setVisible(True)
 
-        def _on_save(m=mode, g=gesture, c=combo, sl=saved_lbl):
+        def _on_save(_checked: bool = False, m: str = mode, g: str = gesture, c: QComboBox = combo, sl: QLabel = saved_lbl):
             selected_display = c.currentText()
             action_key = _ACTION_KEY_FROM_LABEL.get(selected_display, selected_display)
             self._save_mapping(m, g, action_key)
@@ -1296,6 +1300,10 @@ class GestureMapPanel(QWidget):
 
     def _save_mapping(self, mode: str, gesture: str, action: str) -> None:
         try:
+            valid_modes = {'App Mode', 'Media Mode', 'System Mode'}
+            if mode not in valid_modes:
+                raise ValueError(f'Invalid mode key: {mode!r}')
+
             data = _load_gesture_map()
             if mode not in data:
                 data[mode] = {}
@@ -1476,7 +1484,8 @@ class SystemPanel(QWidget):
         root.setContentsMargins(0, 16, 16, 16)
         root.setSpacing(12)
         root.addWidget(SystemCard(state))
-        root.addWidget(ModeCard(state))
+        self._mode_card = ModeCard(state)
+        root.addWidget(self._mode_card)
         self._guide_card = GestureGuideCard()
         root.addWidget(self._guide_card)
         root.addWidget(PerformanceCard(state))
@@ -1486,6 +1495,11 @@ class SystemPanel(QWidget):
         outer.addWidget(scroll)
 
     def refresh_guide(self) -> None:
+        self._guide_card.refresh()
+
+    def refresh_mappings(self) -> None:
+        """Refresh mapping-dependent cards after gesture remapping."""
+        self._mode_card.refresh_current_mode()
         self._guide_card.refresh()
 
 
@@ -1571,7 +1585,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def _on_mapping_changed(self) -> None:
         """Refresh the gesture guide card after a mapping is saved."""
-        self._sys_panel.refresh_guide()
+        self._sys_panel.refresh_mappings()
         self._help_panel.refresh()
 
     def _build_header(self) -> QWidget:

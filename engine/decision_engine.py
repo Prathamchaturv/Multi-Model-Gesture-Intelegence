@@ -116,9 +116,9 @@ class DecisionEngine:
         if config_path is None:
             config_path = Path(__file__).parent.parent / 'config' / 'gesture_map.json'
         self._config_path = Path(config_path)
-        self._last_map_mtime: float | None = None
+        self._last_map_signature: tuple[int, int] | None = None
         self._last_reload_check: float = 0.0
-        self._reload_check_interval_seconds: float = 0.5
+        self._reload_check_interval_seconds: float = 0.2
         self._load_map(self._config_path)
 
     # ------------------------------------------------------------------
@@ -242,21 +242,26 @@ class DecisionEngine:
         self._hold_start     = 0.0
 
     def _maybe_reload_map(self) -> None:
-        """Hot-reload gesture_map.json when its modified timestamp changes."""
+        """Hot-reload gesture_map.json when file signature (mtime + size) changes."""
         now = time.time()
         if now - self._last_reload_check < self._reload_check_interval_seconds:
             return
 
         self._last_reload_check = now
-        try:
-            current_mtime = self._config_path.stat().st_mtime
-        except FileNotFoundError:
-            current_mtime = None
-        except Exception:
-            return
-
-        if self._last_map_mtime != current_mtime:
+        current_signature = self._read_map_signature(self._config_path)
+        if self._last_map_signature != current_signature:
             self._load_map(self._config_path)
+
+    @staticmethod
+    def _read_map_signature(path: Path) -> tuple[int, int] | None:
+        """Return a file signature tuple (mtime_ns, size) or None when unavailable."""
+        try:
+            st = path.stat()
+            return (st.st_mtime_ns, st.st_size)
+        except FileNotFoundError:
+            return None
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # Config loading (private)
@@ -268,19 +273,16 @@ class DecisionEngine:
         try:
             with open(path, 'r', encoding='utf-8') as fh:
                 data = json.load(fh)
-            try:
-                self._last_map_mtime = path.stat().st_mtime
-            except Exception:
-                self._last_map_mtime = None
+            self._last_map_signature = self._read_map_signature(path)
             print(f'[DecisionEngine] Loaded gesture map from {path}')
         except FileNotFoundError:
-            self._last_map_mtime = None
+            self._last_map_signature = None
             print(f'[DecisionEngine] gesture_map.json not found — using built-in defaults')
         except (json.JSONDecodeError, KeyError) as exc:
-            self._last_map_mtime = None
+            self._last_map_signature = None
             print(f'[DecisionEngine] Warning: could not parse gesture map: {exc} — using defaults')
         except Exception as exc:
-            self._last_map_mtime = None
+            self._last_map_signature = None
             print(f'[DecisionEngine] Warning: {exc} — using defaults')
 
         defaults = self._DEFAULT_MAPS

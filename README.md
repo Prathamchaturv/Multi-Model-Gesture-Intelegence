@@ -169,7 +169,7 @@ gesture is interpreted.
 - Rolling-window FPS counter and per-frame processing latency display
 - Volume level and MediaPipe confidence percentage bars
 - Timestamped activity log of gesture events and system state changes
-- Collapsible sidebar with **Vision**, **Mode**, and **Gestures** navigation panels
+- Collapsible sidebar with **Vision**, **Mode**, **Gestures**, and **Guide** navigation panels
 - **Gesture Guide panel** (right side) — live list of all gesture→action mappings loaded
   directly from `gesture_map.json`
 - `--headless` flag to run the pipeline with a plain OpenCV window instead of Qt
@@ -180,6 +180,13 @@ gesture is interpreted.
 - Clicking **Edit** switches the row into edit mode, revealing an action dropdown plus Save/Cancel
 - Updated mappings are written back to `config/gesture_map.json` immediately
 - `DecisionEngine` hot-reloads file changes at runtime, so new mappings execute without restarting
+
+### 3.9 In-App User Guide
+
+- **Guide sidebar tab** provides beginner-friendly onboarding directly inside the app
+- Includes clear steps for:
+  activation (Open Palm hold), gesture usage best practices, and mode switching
+- Displays a live gesture-to-action reference that updates after remapping changes
 
 ---
 
@@ -452,8 +459,9 @@ python -m pytest tests/test_mode_switching.py -v
 | Test File | Class Under Test | Cases | What is Verified |
 |---|---|---|---|
 | `test_gesture_classifier.py` | `GestureClassifier` | 14 | All 10 named gestures, edge cases, Unknown fallback |
-| `test_mode_switching.py` | `DecisionEngine`, `AirMouseController` | 22 | Mode transitions, stability gate, cooldown, action lookup |
+| `test_mode_switching.py` | `DecisionEngine`, `AirMouseController` | 23 | Mode transitions, stability gate, cooldown, hot-reload, action lookup |
 | `test_action_executor.py` | `ActionExecutor` | 15 | Label completeness, action dispatch, feedback, edge cases |
+| `test_logging.py` | `utils.logger` | 1 | Runtime log file creation and write path validation |
 
 ---
 

@@ -274,6 +274,7 @@ _TABS = [
     ('vision',   '◉', 'Vision'),
     ('mode',     '⊞', 'Mode'),
     ('gestures', '✋', 'Gestures'),
+    ('help',     '?', 'Guide'),
 ]
 
 
@@ -1310,6 +1311,143 @@ class GestureMapPanel(QWidget):
         self._load_map()
 
 
+class HelpGuidePanel(QWidget):
+    """Beginner-friendly in-app documentation with live gesture mappings."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._build_ui()
+        self._load_mapping_reference()
+
+    def _build_ui(self) -> None:
+        self.setStyleSheet(f'background-color: {BG_DEEP};')
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(14)
+
+        title = QLabel('USER GUIDE')
+        title.setStyleSheet(f'color: {ACCENT}; font-size: 16px; font-weight: 700; letter-spacing: 2px;')
+        root.addWidget(title)
+
+        subtitle = QLabel('Follow these steps to activate MMGI, use gestures, and switch modes confidently.')
+        subtitle.setWordWrap(True)
+        subtitle.setStyleSheet(f'color: {TEXT_SEC}; font-size: 12px;')
+        root.addWidget(subtitle)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+
+        content = QWidget()
+        content.setStyleSheet('background: transparent;')
+        self._content_lay = QVBoxLayout(content)
+        self._content_lay.setContentsMargins(0, 0, 4, 0)
+        self._content_lay.setSpacing(10)
+
+        self._content_lay.addWidget(self._instruction_card(
+            'How To Activate System',
+            [
+                '1. Face your hand toward the camera with Open Palm.',
+                '2. Hold Open Palm steadily for 2 seconds.',
+                '3. Wait for status to change to ACTIVE before giving commands.',
+            ],
+        ))
+        self._content_lay.addWidget(self._instruction_card(
+            'How To Use Gestures',
+            [
+                '1. Keep your hand centered and well-lit for accurate tracking.',
+                '2. Show one clear gesture at a time.',
+                '3. Hold the gesture briefly until action feedback appears.',
+            ],
+        ))
+        self._content_lay.addWidget(self._instruction_card(
+            'How To Switch Modes',
+            [
+                '1. Hold Three Fingers for about 1 second.',
+                '2. Modes cycle in order: App -> Media -> System -> App.',
+                '3. Wait for the mode label to update before your next command.',
+            ],
+        ))
+
+        self._mapping_title = QLabel('CURRENT GESTURE MAPPING')
+        self._mapping_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px; padding-top: 6px;'
+        )
+        self._content_lay.addWidget(self._mapping_title)
+
+        self._mapping_container = QFrame()
+        self._mapping_container.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        self._mapping_layout = QVBoxLayout(self._mapping_container)
+        self._mapping_layout.setContentsMargins(14, 12, 14, 12)
+        self._mapping_layout.setSpacing(6)
+        self._content_lay.addWidget(self._mapping_container)
+        self._content_lay.addStretch()
+
+        scroll.setWidget(content)
+        root.addWidget(scroll, stretch=1)
+
+    def _instruction_card(self, heading: str, lines: list[str]) -> QWidget:
+        card = QFrame()
+        card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(6)
+
+        head = QLabel(heading)
+        head.setStyleSheet(f'color: {TEXT_PRI}; font-size: 13px; font-weight: 700;')
+        lay.addWidget(head)
+
+        for line in lines:
+            lbl = QLabel(line)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 12px;')
+            lay.addWidget(lbl)
+
+        return card
+
+    def _load_mapping_reference(self) -> None:
+        while self._mapping_layout.count():
+            item = self._mapping_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        data = _load_gesture_map()
+        modes_to_show = ['App Mode', 'Media Mode', 'System Mode']
+
+        found_any = False
+        for mode in modes_to_show:
+            gestures = data.get(mode, {})
+            if not gestures:
+                continue
+            found_any = True
+
+            mode_label = QLabel(mode)
+            mode_label.setStyleSheet(
+                f'color: {_MODE_COLOUR.get(mode, ACCENT)}; font-size: 11px; font-weight: 700; letter-spacing: 1px;'
+            )
+            self._mapping_layout.addWidget(mode_label)
+
+            for gesture, action in gestures.items():
+                row = QLabel(f'{gesture} -> {_ACTION_DISPLAY_LABELS.get(action, action)}')
+                row.setStyleSheet(f'color: {TEXT_SEC}; font-size: 12px; padding-left: 8px;')
+                self._mapping_layout.addWidget(row)
+
+            self._mapping_layout.addWidget(_divider())
+
+        if not found_any:
+            empty = QLabel('No gesture mappings found in config/gesture_map.json')
+            empty.setStyleSheet(f'color: {TEXT_HINT}; font-size: 12px; font-style: italic;')
+            self._mapping_layout.addWidget(empty)
+
+    def refresh(self) -> None:
+        self._load_mapping_reference()
+
+
 class SystemPanel(QWidget):
     def __init__(self, state: SharedState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1403,10 +1541,14 @@ class MainWindow(QMainWindow):
         self._gesture_map_panel = GestureMapPanel()
         self._gesture_map_panel.mapping_changed.connect(self._on_mapping_changed)
 
-        # Stack: index 0 = main view, index 1 = gesture mapping
+        # Help / Guide tab view
+        self._help_panel = HelpGuidePanel()
+
+        # Stack: index 0 = main view, index 1 = gesture mapping, index 2 = help
         self._body_stack = QStackedWidget()
         self._body_stack.addWidget(main_view)
         self._body_stack.addWidget(self._gesture_map_panel)
+        self._body_stack.addWidget(self._help_panel)
 
         body.addWidget(self._sidebar)
         body.addWidget(self._body_stack, stretch=1)
@@ -1420,6 +1562,9 @@ class MainWindow(QMainWindow):
         if tab_id == 'gestures':
             self._gesture_map_panel.reload()
             self._body_stack.setCurrentIndex(1)
+        elif tab_id == 'help':
+            self._help_panel.refresh()
+            self._body_stack.setCurrentIndex(2)
         else:
             self._body_stack.setCurrentIndex(0)
 
@@ -1427,6 +1572,7 @@ class MainWindow(QMainWindow):
     def _on_mapping_changed(self) -> None:
         """Refresh the gesture guide card after a mapping is saved."""
         self._sys_panel.refresh_guide()
+        self._help_panel.refresh()
 
     def _build_header(self) -> QWidget:
         header = QWidget()

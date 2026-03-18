@@ -139,21 +139,30 @@ def run_dashboard() -> None:
     from PyQt6.QtCore    import Qt
     from ui.ui           import MainWindow
     from ui.login_window import LoginWindow
+    from ui.auth_state   import auth_state
 
     app = QApplication(sys.argv)
     app.setApplicationName('MMGI')
     app.setApplicationDisplayName('MMGI — Smart Mode AI Controller')
+    auth_state.reset()
 
     # Show login screen when enabled in config/users.json
     if LoginWindow.should_show():
         login = LoginWindow()
         if login.exec() != LoginWindow.DialogCode.Accepted:
             sys.exit(0)
+    else:
+        auth_state.set_authenticated('local-user')
+
+    if not auth_state.is_authenticated:
+        sys.exit(0)
 
     window = MainWindow()
     window.show()
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+    auth_state.reset()
+    sys.exit(exit_code)
 
 
 # ---------------------------------------------------------------------------

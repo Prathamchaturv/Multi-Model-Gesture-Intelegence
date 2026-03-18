@@ -324,6 +324,7 @@ MMGI/
 | Image capture | OpenCV (`cv2`) | ≥ 4.10 | Webcam access, frame annotation |
 | UI framework | PyQt6 | ≥ 6.7 | Dashboard, signals, background thread |
 | Action automation | PyAutoGUI | ≥ 0.9.54 | Keyboard hotkeys, application launching |
+| Password hashing | bcrypt | ≥ 5.0 | Secure local credential hashing and verification |
 | Array operations | NumPy | ≥ 2.3 | Landmark coordinate arithmetic, EMA computation |
 | Mouse control | `ctypes` (Win32) | stdlib | Raw cursor positioning and click event dispatch |
 | Language | Python | 3.10+ | Core runtime |
@@ -371,6 +372,7 @@ opencv-python>=4.10
 mediapipe>=0.10.30
 pyautogui>=0.9.54
 PyQt6>=6.7
+bcrypt>=5.0
 ```
 
 ---
@@ -522,6 +524,12 @@ Event categories recorded:
 - **Explicit activation required.** The system remains INACTIVE until the user deliberately
   performs the Open Palm hold, preventing background gesture capture from affecting the
   desktop unintentionally.
+- **Secure local authentication.** Login credentials are stored as bcrypt hashes in
+  `config/users.json`; legacy SHA-256 hashes are migrated to bcrypt after successful login.
+- **Runtime auth session gating.** Main dashboard access is only allowed while authenticated
+  session state is valid during app runtime.
+- **Gesture action rate limiting.** Action execution is globally throttled (1 second) and
+  per-action throttled to prevent rapid repeated gesture-triggered commands.
 
 ---
 

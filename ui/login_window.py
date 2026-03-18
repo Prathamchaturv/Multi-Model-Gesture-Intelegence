@@ -2,7 +2,7 @@
 Module: login_window.py
 Description: Optional login dialog shown before the main MMGI dashboard.
              Credentials are loaded from config/users.json; passwords are
-             stored as SHA-256 hashes (never in plain-text).
+             stored as bcrypt hashes (legacy SHA-256 hashes are auto-migrated).
 Author: Pratham Chaturvedi
 
 Behaviour
@@ -23,11 +23,15 @@ import hashlib
 import json
 from pathlib import Path
 
+import bcrypt
+
 from PyQt6.QtCore    import Qt, QEvent, QTimer
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QVBoxLayout,
 )
+
+from ui.auth_state import auth_state
 
 _USERS_PATH   = Path(__file__).parent.parent / 'config' / 'users.json'
 _MAX_ATTEMPTS = 3       # failed attempts before temporary lockout
@@ -57,9 +61,38 @@ _PW_NORMAL = (
 )
 
 
-def _hash_pw(password: str) -> str:
-    """Return the SHA-256 hex digest of *password*."""
+def _hash_pw_legacy(password: str) -> str:
+    """Return the legacy SHA-256 hex digest used in older user files."""
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+
+def _is_bcrypt_hash(value: str) -> bool:
+    return value.startswith(('$2a$', '$2b$', '$2y$'))
+
+
+def _hash_pw_bcrypt(password: str) -> str:
+    """Return bcrypt hash for password."""
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def _verify_password(password: str, stored_hash: str) -> tuple[bool, bool]:
+    """
+    Verify a password against stored hash.
+
+    Returns:
+        (is_valid, needs_upgrade)
+        needs_upgrade=True means legacy SHA-256 matched and should be migrated.
+    """
+    if not stored_hash:
+        return False, False
+
+    if _is_bcrypt_hash(stored_hash):
+        try:
+            return bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')), False
+        except ValueError:
+            return False, False
+
+    return _hash_pw_legacy(password) == stored_hash, True
 
 
 def _load_users() -> dict:
@@ -242,7 +275,7 @@ class LoginWindow(QDialog):
     Styled login dialog gating access to the MMGI dashboard.
 
     Credentials are loaded from config/users.json; passwords are stored as
-    SHA-256 hashes (never in plain-text).  Closing or cancelling the dialog
+    bcrypt hashes (never in plain-text). Closing or cancelling the dialog
     returns ``QDialog.DialogCode.Rejected``.
 
     Improvements over the original
@@ -281,10 +314,6 @@ class LoginWindow(QDialog):
         self._pw_visible      = False
         self._countdown_val   = 0
         self._countdown_timer: QTimer | None = None
-        # Store hashed values briefly so the plain password does not linger
-        self._pending_user    = ''
-        self._pending_hash    = ''
-
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -469,23 +498,27 @@ class LoginWindow(QDialog):
             self._show_error('❌  Please enter both username and password.')
             return
 
-        # Hash the password immediately so plain-text does not linger in memory.
-        # Defer the actual comparison by 60 ms so the loading state can paint.
-        self._pending_user = username
-        self._pending_hash = _hash_pw(password)
         self._set_loading(True)
         self._msg_label.setText('')
-        QTimer.singleShot(60, self._authenticate)
+        self._authenticate(username, password)
 
-    def _authenticate(self) -> None:
-        """Credential check, called ~60 ms after loading state is shown."""
+    def _authenticate(self, username: str, password: str) -> None:
+        """Validate credentials and establish authenticated runtime session."""
         stored_user = self._users.get('username', '')
         stored_hash = self._users.get('password', '')
 
-        if self._pending_user == stored_user and self._pending_hash == stored_hash:
+        valid_password, needs_upgrade = _verify_password(password, stored_hash)
+
+        if username == stored_user and valid_password:
+            if needs_upgrade:
+                self._users['password'] = _hash_pw_bcrypt(password)
+                self._save_users()
+
+            auth_state.set_authenticated(username)
             self._show_success('✓  Access granted.')
             QTimer.singleShot(400, self.accept)
         else:
+            auth_state.reset()
             self._set_loading(False)
             self._attempts += 1
             remaining = _MAX_ATTEMPTS - self._attempts
@@ -496,6 +529,14 @@ class LoginWindow(QDialog):
                 )
             else:
                 self._lock_temporarily()
+
+    def _save_users(self) -> None:
+        """Persist user file updates (used for hash migration)."""
+        try:
+            with open(_USERS_PATH, 'w', encoding='utf-8') as fh:
+                json.dump(self._users, fh, indent=4)
+        except Exception:
+            pass
 
     def _set_loading(self, loading: bool) -> None:
         self._login_btn.setEnabled(not loading)

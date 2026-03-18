@@ -126,6 +126,16 @@ class TestActionExecutorExecution(unittest.TestCase):
             self.executor.execute('mute')
         self.assertEqual(self.executor._last_action, 'mute')
 
+    def test_global_cooldown_blocks_rapid_different_actions(self) -> None:
+        with patch('engine.action_executor.time.time', side_effect=[100.0, 100.2]), \
+             patch.object(self.executor, '_launch') as mock_launch, \
+             patch.object(self.executor, '_launch_store_app') as mock_store:
+            self.executor.execute('open_brave')
+            self.executor.execute('open_apple_music')
+
+        mock_launch.assert_called_once()
+        mock_store.assert_not_called()
+
 
 class TestActionExecutorFeedback(unittest.TestCase):
     """Tests for the display_action overlay method."""

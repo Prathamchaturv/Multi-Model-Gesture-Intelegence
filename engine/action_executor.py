@@ -64,6 +64,7 @@ class ActionExecutor:
 
     _FEEDBACK_DURATION: float = 2.5   # seconds to show on-screen notification
     _COOLDOWN:          float = 1.0   # seconds before the same action may fire again
+    _GLOBAL_COOLDOWN:   float = 1.0   # minimum gap between any two actions
 
     def __init__(self, config: dict | None = None):
         cfg = config or {}
@@ -80,6 +81,7 @@ class ActionExecutor:
 
         self._last_action: str | None = None
         self._last_action_time: float = 0.0
+        self._last_global_action_time: float = 0.0
         # Per-action cooldown tracking: action → timestamp of last execution
         self._last_executed: dict[str, float] = {}
         self._logger = get_mmgi_logger()
@@ -92,10 +94,15 @@ class ActionExecutor:
         """Execute the named action, subject to per-action cooldown."""
         now = time.time()
 
+        # Global rate-limit across all gestures/actions.
+        if now - self._last_global_action_time < self._GLOBAL_COOLDOWN:
+            return
+
         # Rate-limit: skip if this action is still within its cooldown window
         if now - self._last_executed.get(action, 0.0) < self._COOLDOWN:
             return
 
+        self._last_global_action_time = now
         self._last_executed[action] = now
         self._last_action      = action
         self._last_action_time = now

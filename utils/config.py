@@ -46,6 +46,13 @@ class Config:
             'brave_path': r'%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe',
             'apple_music_aumid': 'AppleInc.AppleMusicWin_nzyj5cx40ttqa!App',
         },
+        'adaptive_gesture': {
+            'enabled': True,
+            'training_frames': 25,
+            'match_threshold': 0.12,
+            'confirm_frames': 4,
+            'store_path': 'config/custom_gestures.json',
+        },
     }
 
     def __init__(self, config_path: str | None = None):

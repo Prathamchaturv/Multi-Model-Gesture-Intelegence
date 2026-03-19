@@ -1134,8 +1134,8 @@ class GestureMapPanel(QWidget):
     def _build_ui(self) -> None:
         self.setStyleSheet(f'background-color: {BG_DEEP};')
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 24)
-        root.setSpacing(16)
+        root.setContentsMargins(24, 18, 24, 18)
+        root.setSpacing(10)
 
         # Header ────────────────────────────────────────────────────────
         hdr = QHBoxLayout()
@@ -1260,7 +1260,8 @@ class GestureMapPanel(QWidget):
         list_lay.addLayout(list_title_row)
 
         self._custom_list = QListWidget()
-        self._custom_list.setMinimumHeight(92)
+        self._custom_list.setMinimumHeight(56)
+        self._custom_list.setMaximumHeight(120)
         self._custom_list.setStyleSheet(f"""
             QListWidget {{
                 background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
@@ -1295,6 +1296,7 @@ class GestureMapPanel(QWidget):
         # Scrollable table area ─────────────────────────────────────────
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
 
         self._container = QWidget()
@@ -1343,6 +1345,7 @@ class GestureMapPanel(QWidget):
 
     def _build_row(self, mode: str, gesture: str, current_action: str) -> QWidget:
         row = QFrame()
+        row.setMinimumHeight(50)
         row.setStyleSheet(
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
@@ -1352,12 +1355,14 @@ class GestureMapPanel(QWidget):
 
         gesture_lbl = QLabel(gesture)
         gesture_lbl.setFixedWidth(180)
+        gesture_lbl.setWordWrap(True)
         gesture_lbl.setStyleSheet(
             f'color: {TEXT_PRI}; font-size: 13px; background: transparent; border: none;'
         )
 
         action_lbl = QLabel(_ACTION_DISPLAY_LABELS.get(current_action, current_action))
         action_lbl.setFixedWidth(220)
+        action_lbl.setWordWrap(True)
         action_lbl.setStyleSheet(
             f'color: {TEXT_SEC}; font-size: 12px; background: transparent; border: none;'
         )

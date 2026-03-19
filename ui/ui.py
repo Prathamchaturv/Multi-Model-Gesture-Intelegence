@@ -1109,6 +1109,8 @@ class GestureGuideCard(QFrame):
 
 class GestureMapPanel(QWidget):
     mapping_changed = pyqtSignal()   # emitted after any mapping is saved
+    _TRAIN_SECTION_LABEL = 'Adaptive Gesture Training'
+    _SAVED_SECTION_LABEL = 'Saved Custom Gestures'
 
     def __init__(self, state: SharedState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1152,20 +1154,31 @@ class GestureMapPanel(QWidget):
 
         # Adaptive training panel
         train_card = QFrame()
-        train_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        train_card.setMaximumHeight(158)
+        train_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         train_card.setStyleSheet(
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
         train_lay = QVBoxLayout(train_card)
-        train_lay.setContentsMargins(14, 12, 14, 12)
-        train_lay.setSpacing(10)
+        train_lay.setContentsMargins(10, 8, 10, 8)
+        train_lay.setSpacing(6)
 
-        train_title = QLabel('ADAPTIVE GESTURE TRAINING')
-        train_title.setStyleSheet(
-            f'color: {ACTIVE}; font-size: 11px; font-weight: 700; letter-spacing: 1px; background: transparent; border: none;'
+        self._train_toggle_btn = QPushButton()
+        self._train_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._train_toggle_btn.setStyleSheet(
+            f'QPushButton {{ '
+            f'background: transparent; color: {ACTIVE}; border: none; '
+            f'font-size: 12px; font-weight: 700; letter-spacing: 1px; text-align: left; padding: 4px 6px; }}'
+            f'QPushButton:hover {{ color: {ACCENT}; }}'
         )
-        train_lay.addWidget(train_title)
+        self._train_toggle_btn.clicked.connect(
+            lambda: self._toggle_section(self._train_content, self._train_toggle_btn, self._TRAIN_SECTION_LABEL)
+        )
+        train_lay.addWidget(self._train_toggle_btn)
+
+        self._train_content = QWidget()
+        train_content_lay = QVBoxLayout(self._train_content)
+        train_content_lay.setContentsMargins(8, 2, 8, 6)
+        train_content_lay.setSpacing(8)
 
         row = QHBoxLayout()
         row.setSpacing(8)
@@ -1210,7 +1223,7 @@ class GestureMapPanel(QWidget):
         row.addWidget(self._gesture_name_input, stretch=2)
         row.addWidget(self._custom_action_combo, stretch=2)
         row.addWidget(self._train_btn)
-        train_lay.addLayout(row)
+        train_content_lay.addLayout(row)
 
         self._train_progress = QProgressBar()
         self._train_progress.setRange(0, self._recorder.target_frames)
@@ -1224,31 +1237,46 @@ class GestureMapPanel(QWidget):
             }}
             QProgressBar::chunk {{ background: {ACTIVE}; border-radius: 5px; }}
         """)
-        train_lay.addWidget(self._train_progress)
+        train_content_lay.addWidget(self._train_progress)
 
         self._train_status = QLabel('Enter name and action, then click Train New Gesture.')
         self._train_status.setFixedHeight(18)
         self._train_status.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px;')
-        train_lay.addWidget(self._train_status)
+        train_content_lay.addWidget(self._train_status)
+
+        train_lay.addWidget(self._train_content)
 
         root.addWidget(train_card)
 
         # Custom gesture list
         list_card = QFrame()
-        list_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        list_card.setMaximumHeight(176)
+        list_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         list_card.setStyleSheet(
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
         list_lay = QVBoxLayout(list_card)
-        list_lay.setContentsMargins(14, 12, 14, 12)
-        list_lay.setSpacing(8)
+        list_lay.setContentsMargins(10, 8, 10, 8)
+        list_lay.setSpacing(6)
+
+        self._list_toggle_btn = QPushButton()
+        self._list_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._list_toggle_btn.setStyleSheet(
+            f'QPushButton {{ '
+            f'background: transparent; color: {ACCENT}; border: none; '
+            f'font-size: 12px; font-weight: 700; letter-spacing: 1px; text-align: left; padding: 4px 6px; }}'
+            f'QPushButton:hover {{ color: {TEXT_PRI}; }}'
+        )
+        self._list_toggle_btn.clicked.connect(
+            lambda: self._toggle_section(self._list_content, self._list_toggle_btn, self._SAVED_SECTION_LABEL)
+        )
+        list_lay.addWidget(self._list_toggle_btn)
+
+        self._list_content = QWidget()
+        list_content_lay = QVBoxLayout(self._list_content)
+        list_content_lay.setContentsMargins(8, 2, 8, 6)
+        list_content_lay.setSpacing(8)
 
         list_title_row = QHBoxLayout()
-        list_title = QLabel('SAVED CUSTOM GESTURES')
-        list_title.setStyleSheet(
-            f'color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px; background: transparent; border: none;'
-        )
         self._delete_custom_btn = QPushButton('Delete Selected')
         self._delete_custom_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._delete_custom_btn.setStyleSheet(f"""
@@ -1259,14 +1287,13 @@ class GestureMapPanel(QWidget):
             QPushButton:hover {{ background: rgba(255,68,102,0.24); }}
         """)
         self._delete_custom_btn.clicked.connect(self._delete_selected_custom)
-        list_title_row.addWidget(list_title)
         list_title_row.addStretch()
         list_title_row.addWidget(self._delete_custom_btn)
-        list_lay.addLayout(list_title_row)
+        list_content_lay.addLayout(list_title_row)
 
         self._custom_list = QListWidget()
-        self._custom_list.setMinimumHeight(56)
-        self._custom_list.setMaximumHeight(108)
+        self._custom_list.setMinimumHeight(88)
+        self._custom_list.setMaximumHeight(126)
         self._custom_list.setStyleSheet(f"""
             QListWidget {{
                 background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
@@ -1275,9 +1302,14 @@ class GestureMapPanel(QWidget):
             QListWidget::item {{ padding: 6px 8px; border-radius: 6px; }}
             QListWidget::item:selected {{ background: rgba(0,229,255,0.2); color: {ACCENT}; }}
         """)
-        list_lay.addWidget(self._custom_list)
+        list_content_lay.addWidget(self._custom_list)
+
+        list_lay.addWidget(self._list_content)
 
         root.addWidget(list_card)
+
+        self._set_section_collapsed(self._train_content, self._train_toggle_btn, True, self._TRAIN_SECTION_LABEL)
+        self._set_section_collapsed(self._list_content, self._list_toggle_btn, True, self._SAVED_SECTION_LABEL)
 
         # Column header row
         header_row = QFrame()
@@ -1497,6 +1529,16 @@ class GestureMapPanel(QWidget):
         self._custom_action_combo.setEnabled(enabled)
         self._delete_custom_btn.setEnabled(enabled)
 
+    def _set_section_collapsed(self, content: QWidget, button: QPushButton, collapsed: bool, label: str) -> None:
+        content.setVisible(not collapsed)
+        button.setProperty('collapsed', collapsed)
+        marker = '►' if collapsed else '▼'
+        button.setText(f'{marker} {label.upper()}')
+
+    def _toggle_section(self, content: QWidget, button: QPushButton, label: str) -> None:
+        currently_collapsed = bool(button.property('collapsed'))
+        self._set_section_collapsed(content, button, not currently_collapsed, label)
+
     def _on_train_clicked(self) -> None:
         if self._training_active:
             self._training_active = False
@@ -1538,6 +1580,7 @@ class GestureMapPanel(QWidget):
         self._training_name = gesture_name
         self._training_action = action_key
         self._training_active = True
+        self._set_section_collapsed(self._train_content, self._train_toggle_btn, False, self._TRAIN_SECTION_LABEL)
         self._train_btn.setText('Cancel Training')
         self._set_training_inputs_enabled(False)
         self._train_status.setText('Training started. Hold your gesture steadily in view.')

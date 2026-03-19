@@ -1135,7 +1135,7 @@ class GestureMapPanel(QWidget):
         self.setStyleSheet(f'background-color: {BG_DEEP};')
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 18, 24, 18)
-        root.setSpacing(10)
+        root.setSpacing(8)
 
         # Header ────────────────────────────────────────────────────────
         hdr = QHBoxLayout()
@@ -1152,6 +1152,8 @@ class GestureMapPanel(QWidget):
 
         # Adaptive training panel
         train_card = QFrame()
+        train_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        train_card.setMaximumHeight(158)
         train_card.setStyleSheet(
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
@@ -1225,6 +1227,7 @@ class GestureMapPanel(QWidget):
         train_lay.addWidget(self._train_progress)
 
         self._train_status = QLabel('Enter name and action, then click Train New Gesture.')
+        self._train_status.setFixedHeight(18)
         self._train_status.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px;')
         train_lay.addWidget(self._train_status)
 
@@ -1232,6 +1235,8 @@ class GestureMapPanel(QWidget):
 
         # Custom gesture list
         list_card = QFrame()
+        list_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        list_card.setMaximumHeight(176)
         list_card.setStyleSheet(
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
@@ -1261,7 +1266,7 @@ class GestureMapPanel(QWidget):
 
         self._custom_list = QListWidget()
         self._custom_list.setMinimumHeight(56)
-        self._custom_list.setMaximumHeight(120)
+        self._custom_list.setMaximumHeight(108)
         self._custom_list.setStyleSheet(f"""
             QListWidget {{
                 background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
@@ -1295,6 +1300,7 @@ class GestureMapPanel(QWidget):
 
         # Scrollable table area ─────────────────────────────────────────
         scroll = QScrollArea()
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
@@ -1901,11 +1907,14 @@ class MainWindow(QMainWindow):
         if tab_id == 'gestures':
             self._gesture_map_panel.reload()
             self._body_stack.setCurrentIndex(1)
+            self._activity.setVisible(False)
         elif tab_id == 'help':
             self._help_panel.refresh()
             self._body_stack.setCurrentIndex(2)
+            self._activity.setVisible(False)
         else:
             self._body_stack.setCurrentIndex(0)
+            self._activity.setVisible(True)
 
     @pyqtSlot()
     def _on_mapping_changed(self) -> None:

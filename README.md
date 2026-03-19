@@ -196,6 +196,20 @@ gesture is interpreted.
 - Updated mappings are written back to `config/gesture_map.json` immediately
 - `DecisionEngine` hot-reloads file changes at runtime, so new mappings execute without restarting
 
+### 3.9 Adaptive Gesture Learning (Custom Training)
+
+- **Train New Gesture** workflow in the Gestures tab:
+  capture 25 valid hand frames (21 landmarks x/y/z), skipping frames where no hand is detected
+- Landmark normalization is applied during training and inference:
+  wrist-relative translation + scale normalization for position/size invariance
+- Recorded frames are averaged into one stable reference pattern per custom gesture
+- Custom gestures are saved in `config/custom_gestures.json` with:
+  gesture name, normalized average landmark pattern, and assigned action
+- Real-time matcher compares normalized live landmarks against saved patterns
+  using mean Euclidean distance with configurable threshold
+- Multi-frame confirmation gate (default 4 frames) prevents unstable one-frame triggers
+- Runtime behavior: custom gestures are checked first; if none match, MMGI falls back to predefined gestures
+
 ### 3.9 In-App User Guide
 
 - **Guide sidebar tab** provides beginner-friendly onboarding directly inside the app

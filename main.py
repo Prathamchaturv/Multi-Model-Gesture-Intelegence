@@ -31,6 +31,11 @@ sys.path.insert(0, str(project_root))
 def run_headless() -> None:
     """Original OpenCV gesture pipeline (no GUI)."""
     import cv2
+    from core.adaptive_gesture_learning import (
+        AdaptiveGestureMatcher,
+        CustomGestureStore,
+        MultiFrameGestureConfirmation,
+    )
     from core.camera              import Camera
     from core.hand_tracking       import HandTracker
     from core.gesture_classifier  import GestureClassifier
@@ -69,6 +74,22 @@ def run_headless() -> None:
             stability_threshold  = config.get('activation.stability_threshold'),
         )
         decision_engine    = DecisionEngine()
+        custom_matcher = None
+        custom_confirm = None
+        if bool(config.get('adaptive_gesture.enabled', True)):
+            custom_store_path = str(config.get('adaptive_gesture.store_path') or 'config/custom_gestures.json')
+            custom_store_file = Path(custom_store_path)
+            if not custom_store_file.is_absolute():
+                custom_store_file = Path(__file__).parent / custom_store_file
+            custom_store = CustomGestureStore(custom_store_file)
+            custom_matcher = AdaptiveGestureMatcher(
+                store=custom_store,
+                threshold=float(config.get('adaptive_gesture.match_threshold') or 0.12),
+            )
+            custom_confirm = MultiFrameGestureConfirmation(
+                confirm_frames=int(config.get('adaptive_gesture.confirm_frames') or 4)
+            )
+
         action_executor    = ActionExecutor(config={
             'brave_path':        config.get('apps.brave_path'),
             'apple_music_aumid': config.get('apps.apple_music_aumid'),
@@ -96,12 +117,29 @@ def run_headless() -> None:
 
             hand_data = hands_info.get('right') or hands_info.get('left')
             gesture   = None
+            custom_action = None
             if hand_data:
-                gesture = gesture_classifier.classify(hand_data['finger_states'])
-                if gesture == 'Unknown':
-                    gesture = None
+                if custom_matcher is not None and custom_confirm is not None:
+                    custom_match = custom_matcher.match(hand_data.get('landmarks'))
+                    stable_name = custom_confirm.update(
+                        custom_match.name if custom_match is not None else None
+                    )
+                    if stable_name and custom_match is not None and custom_match.name == stable_name:
+                        gesture = f'Custom: {custom_match.name}'
+                        custom_action = custom_match.action
 
-            action, mode_changed = decision_engine.process(gesture)
+                if custom_action is None:
+                    gesture = gesture_classifier.classify(hand_data['finger_states'])
+                    if gesture == 'Unknown':
+                        gesture = None
+            elif custom_confirm is not None:
+                custom_confirm.reset()
+
+            if custom_action:
+                decision_engine.process(None)
+                action, mode_changed = custom_action, False
+            else:
+                action, mode_changed = decision_engine.process(gesture)
             if mode_changed:
                 print(f'  Mode → {decision_engine.current_mode}')
 

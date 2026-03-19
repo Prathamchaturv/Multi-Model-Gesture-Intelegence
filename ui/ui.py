@@ -109,11 +109,17 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QFrame, QProgressBar, QScrollArea,
     QSizePolicy, QSpacerItem, QMainWindow, QMessageBox,
-    QComboBox, QStackedWidget,
+    QComboBox, QStackedWidget, QLineEdit, QListWidget, QListWidgetItem,
 )
 
 from ui.shared_state  import SharedState
 from ui.worker_thread import WorkerThread
+from utils.config     import Config
+from core.adaptive_gesture_learning import (
+    CustomGestureStore,
+    GestureRecorder,
+    GestureDataError,
+)
 
 # ---------------------------------------------------------------------------
 # Gesture-map config helpers (shared across panels)
@@ -135,6 +141,13 @@ _ACTION_DISPLAY_LABELS: dict[str, str] = {
 }
 
 _ACTION_KEY_FROM_LABEL = {v: k for k, v in _ACTION_DISPLAY_LABELS.items()}
+
+_CUSTOM_ACTION_DISPLAY_LABELS: dict[str, str] = {
+    key: label
+    for key, label in _ACTION_DISPLAY_LABELS.items()
+    if key != 'next_mode'
+}
+_CUSTOM_ACTION_KEY_FROM_LABEL = {v: k for k, v in _CUSTOM_ACTION_DISPLAY_LABELS.items()}
 
 
 def _load_gesture_map() -> dict:
@@ -1097,10 +1110,26 @@ class GestureGuideCard(QFrame):
 class GestureMapPanel(QWidget):
     mapping_changed = pyqtSignal()   # emitted after any mapping is saved
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, state: SharedState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._state = state
+
+        cfg = Config()
+        store_path = str(cfg.get('adaptive_gesture.store_path') or 'config/custom_gestures.json')
+        resolved_store_path = Path(store_path)
+        if not resolved_store_path.is_absolute():
+            resolved_store_path = Path(__file__).parent.parent / resolved_store_path
+
+        self._custom_store = CustomGestureStore(resolved_store_path)
+        self._recorder = GestureRecorder(target_frames=int(cfg.get('adaptive_gesture.training_frames') or 25))
+        self._training_active = False
+        self._training_name = ''
+        self._training_action = ''
+
         self._build_ui()
         self._load_map()
+        self._refresh_custom_gestures()
+        self._state.landmarks_changed.connect(self._on_landmarks)
 
     def _build_ui(self) -> None:
         self.setStyleSheet(f'background-color: {BG_DEEP};')
@@ -1120,6 +1149,129 @@ class GestureMapPanel(QWidget):
         hdr.addStretch()
         hdr.addWidget(subtitle)
         root.addLayout(hdr)
+
+        # Adaptive training panel
+        train_card = QFrame()
+        train_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
+        )
+        train_lay = QVBoxLayout(train_card)
+        train_lay.setContentsMargins(14, 12, 14, 12)
+        train_lay.setSpacing(10)
+
+        train_title = QLabel('ADAPTIVE GESTURE TRAINING')
+        train_title.setStyleSheet(
+            f'color: {ACTIVE}; font-size: 11px; font-weight: 700; letter-spacing: 1px; background: transparent; border: none;'
+        )
+        train_lay.addWidget(train_title)
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+
+        self._gesture_name_input = QLineEdit()
+        self._gesture_name_input.setPlaceholderText('Gesture name')
+        self._gesture_name_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 6px; padding: 6px 10px; font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {ACCENT}; }}
+        """)
+
+        self._custom_action_combo = QComboBox()
+        self._custom_action_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 6px; padding: 6px 10px; font-size: 12px;
+            }}
+            QComboBox::drop-down {{ border: none; padding-right: 6px; }}
+            QComboBox:hover {{ border-color: {ACCENT}; }}
+            QComboBox QAbstractItemView {{
+                background: {BG_CARD}; border: 1px solid {BORDER}; color: {TEXT_PRI};
+                selection-background-color: rgba(0,229,255,0.2);
+            }}
+        """)
+        for action_label in _CUSTOM_ACTION_DISPLAY_LABELS.values():
+            self._custom_action_combo.addItem(action_label)
+
+        self._train_btn = QPushButton('Train New Gesture')
+        self._train_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._train_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0,255,136,0.12); color: {ACTIVE}; border: 1px solid {ACTIVE};
+                border-radius: 6px; font-size: 12px; font-weight: 700; padding: 6px 10px;
+            }}
+            QPushButton:hover {{ background: rgba(0,255,136,0.24); }}
+        """)
+        self._train_btn.clicked.connect(self._on_train_clicked)
+
+        row.addWidget(self._gesture_name_input, stretch=2)
+        row.addWidget(self._custom_action_combo, stretch=2)
+        row.addWidget(self._train_btn)
+        train_lay.addLayout(row)
+
+        self._train_progress = QProgressBar()
+        self._train_progress.setRange(0, self._recorder.target_frames)
+        self._train_progress.setValue(0)
+        self._train_progress.setTextVisible(True)
+        self._train_progress.setFormat('Frames: %v/%m')
+        self._train_progress.setStyleSheet(f"""
+            QProgressBar {{
+                background: {BORDER}; color: {TEXT_PRI}; border-radius: 5px; border: none;
+                height: 18px; text-align: center;
+            }}
+            QProgressBar::chunk {{ background: {ACTIVE}; border-radius: 5px; }}
+        """)
+        train_lay.addWidget(self._train_progress)
+
+        self._train_status = QLabel('Enter name and action, then click Train New Gesture.')
+        self._train_status.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px;')
+        train_lay.addWidget(self._train_status)
+
+        root.addWidget(train_card)
+
+        # Custom gesture list
+        list_card = QFrame()
+        list_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
+        )
+        list_lay = QVBoxLayout(list_card)
+        list_lay.setContentsMargins(14, 12, 14, 12)
+        list_lay.setSpacing(8)
+
+        list_title_row = QHBoxLayout()
+        list_title = QLabel('SAVED CUSTOM GESTURES')
+        list_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px; background: transparent; border: none;'
+        )
+        self._delete_custom_btn = QPushButton('Delete Selected')
+        self._delete_custom_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._delete_custom_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(255,68,102,0.12); color: {INACTIVE}; border: 1px solid {INACTIVE};
+                border-radius: 6px; font-size: 11px; font-weight: 700; padding: 5px 10px;
+            }}
+            QPushButton:hover {{ background: rgba(255,68,102,0.24); }}
+        """)
+        self._delete_custom_btn.clicked.connect(self._delete_selected_custom)
+        list_title_row.addWidget(list_title)
+        list_title_row.addStretch()
+        list_title_row.addWidget(self._delete_custom_btn)
+        list_lay.addLayout(list_title_row)
+
+        self._custom_list = QListWidget()
+        self._custom_list.setMinimumHeight(92)
+        self._custom_list.setStyleSheet(f"""
+            QListWidget {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 8px; padding: 4px;
+            }}
+            QListWidget::item {{ padding: 6px 8px; border-radius: 6px; }}
+            QListWidget::item:selected {{ background: rgba(0,229,255,0.2); color: {ACCENT}; }}
+        """)
+        list_lay.addWidget(self._custom_list)
+
+        root.addWidget(list_card)
 
         # Column header row
         header_row = QFrame()
@@ -1329,9 +1481,162 @@ class GestureMapPanel(QWidget):
         except Exception as exc:
             print(f'[GestureMapPanel] Failed to save: {exc}')
 
+    def _set_training_inputs_enabled(self, enabled: bool) -> None:
+        self._gesture_name_input.setEnabled(enabled)
+        self._custom_action_combo.setEnabled(enabled)
+        self._delete_custom_btn.setEnabled(enabled)
+
+    def _on_train_clicked(self) -> None:
+        if self._training_active:
+            self._training_active = False
+            self._recorder.reset()
+            self._train_progress.setValue(0)
+            self._train_btn.setText('Train New Gesture')
+            self._train_status.setText('Training cancelled.')
+            self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+            self._set_training_inputs_enabled(True)
+            return
+
+        gesture_name = self._gesture_name_input.text().strip()
+        if not gesture_name:
+            self._train_status.setText('Gesture name is required.')
+            self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+            return
+
+        if gesture_name in self._custom_store.gestures:
+            answer = QMessageBox.question(
+                self,
+                'Overwrite Gesture',
+                f'A gesture named "{gesture_name}" already exists. Overwrite it?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        selected_label = self._custom_action_combo.currentText()
+        action_key = _CUSTOM_ACTION_KEY_FROM_LABEL.get(selected_label, '').strip()
+        if not action_key:
+            self._train_status.setText('Please choose a valid action.')
+            self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+            return
+
+        self._recorder.reset()
+        self._train_progress.setMaximum(self._recorder.target_frames)
+        self._train_progress.setValue(0)
+        self._training_name = gesture_name
+        self._training_action = action_key
+        self._training_active = True
+        self._train_btn.setText('Cancel Training')
+        self._set_training_inputs_enabled(False)
+        self._train_status.setText('Training started. Hold your gesture steadily in view.')
+        self._train_status.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px;')
+
+    @pyqtSlot(object)
+    def _on_landmarks(self, landmarks) -> None:
+        if not self._training_active:
+            return
+
+        if landmarks is None:
+            self._train_status.setText('No hand detected. Waiting for valid frames...')
+            self._train_status.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px;')
+            return
+
+        added = self._recorder.add_frame(landmarks)
+        if not added:
+            self._train_status.setText('Invalid frame skipped. Keep your hand steady and fully visible.')
+            self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+            return
+
+        self._train_progress.setValue(self._recorder.frame_count)
+        self._train_status.setText(
+            f'Recording... {self._recorder.frame_count}/{self._recorder.target_frames} valid frames captured.'
+        )
+        self._train_status.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px;')
+
+        if self._recorder.is_complete:
+            self._finalize_training()
+
+    def _finalize_training(self) -> None:
+        try:
+            pattern = self._recorder.average_pattern()
+            self._custom_store.add_or_update(
+                self._training_name,
+                pattern,
+                self._training_action,
+            )
+            self._train_status.setText(
+                f'Saved custom gesture "{self._training_name}" mapped to '
+                f'{_CUSTOM_ACTION_DISPLAY_LABELS.get(self._training_action, self._training_action)}.'
+            )
+            self._train_status.setStyleSheet(f'color: {ACTIVE}; font-size: 11px;')
+            self._refresh_custom_gestures()
+        except GestureDataError as exc:
+            self._train_status.setText(f'Training failed: {exc}')
+            self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+        except Exception as exc:
+            self._train_status.setText(f'Training failed: {exc}')
+            self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+        finally:
+            self._training_active = False
+            self._recorder.reset()
+            self._train_progress.setValue(0)
+            self._train_btn.setText('Train New Gesture')
+            self._set_training_inputs_enabled(True)
+
+    def _refresh_custom_gestures(self) -> None:
+        self._custom_store.reload_if_changed()
+        self._custom_list.clear()
+
+        all_gestures = self._custom_store.list_gestures()
+        if not all_gestures:
+            item = QListWidgetItem('No custom gestures saved yet.')
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._custom_list.addItem(item)
+            return
+
+        for item_data in all_gestures:
+            name = item_data['name']
+            action_key = item_data['action']
+            action_label = _CUSTOM_ACTION_DISPLAY_LABELS.get(action_key, action_key)
+            item = QListWidgetItem(f'{name}  ->  {action_label}')
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            self._custom_list.addItem(item)
+
+    def _delete_selected_custom(self) -> None:
+        selected_item = self._custom_list.currentItem()
+        if selected_item is None:
+            self._train_status.setText('Select a saved custom gesture to delete.')
+            self._train_status.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px;')
+            return
+
+        gesture_name = selected_item.data(Qt.ItemDataRole.UserRole)
+        if not gesture_name:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            'Delete Gesture',
+            f'Delete custom gesture "{gesture_name}"?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        deleted = self._custom_store.delete(str(gesture_name))
+        if deleted:
+            self._train_status.setText(f'Deleted custom gesture "{gesture_name}".')
+            self._train_status.setStyleSheet(f'color: {ACTIVE}; font-size: 11px;')
+            self._refresh_custom_gestures()
+        else:
+            self._train_status.setText(f'Could not delete "{gesture_name}".')
+            self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+
     def reload(self) -> None:
         """Re-read gesture_map.json and refresh the displayed rows."""
         self._load_map()
+        self._refresh_custom_gestures()
 
 
 class HelpGuidePanel(QWidget):
@@ -1567,7 +1872,7 @@ class MainWindow(QMainWindow):
         main_lay.addWidget(self._sys_panel)
 
         # Gestures tab view
-        self._gesture_map_panel = GestureMapPanel()
+        self._gesture_map_panel = GestureMapPanel(self._state)
         self._gesture_map_panel.mapping_changed.connect(self._on_mapping_changed)
 
         # Help / Guide tab view

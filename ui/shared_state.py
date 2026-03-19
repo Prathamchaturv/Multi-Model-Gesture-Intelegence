@@ -51,6 +51,7 @@ class SharedState(QObject):
     cooldown_changed        = pyqtSignal(bool)
     volume_changed          = pyqtSignal(int)
     mode_stability_changed  = pyqtSignal(float)
+    landmarks_changed       = pyqtSignal(object)
 
     # Batched update – emits a snapshot dict for panels that want everything
     snapshot_ready          = pyqtSignal(dict)
@@ -74,6 +75,7 @@ class SharedState(QObject):
         self._volume_level     = 50
         self._mode_stability   = 0.0
         self._last_action      = ''
+        self._latest_landmarks = None
 
     # ------------------------------------------------------------------ getters
     @property
@@ -144,6 +146,11 @@ class SharedState(QObject):
         """Record the most recently executed action and broadcast it."""
         self._last_action = action
         self.action_executed.emit(action)
+
+    def set_landmarks(self, landmarks) -> None:
+        """Broadcast latest 21-point landmarks (or None when no hand)."""
+        self._latest_landmarks = landmarks
+        self.landmarks_changed.emit(landmarks)
 
     def emit_log(self, timestamp: str, category: str, description: str) -> None:
         """Convenience wrapper to push an activity log event."""

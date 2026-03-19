@@ -31,6 +31,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 
 import cv2
 from PyQt6.QtCore  import QThread, pyqtSignal
@@ -39,6 +40,11 @@ from PyQt6.QtGui   import QImage
 from core.camera                 import Camera
 from core.hand_tracking          import HandTracker
 from core.gesture_classifier     import GestureClassifier
+from core.adaptive_gesture_learning import (
+    AdaptiveGestureMatcher,
+    CustomGestureStore,
+    MultiFrameGestureConfirmation,
+)
 from core.system_mode_engine     import AirMouseController
 from engine.activation_manager   import ActivationManager
 from engine.decision_engine      import DecisionEngine
@@ -224,6 +230,24 @@ class WorkerThread(QThread):
             )
 
             gesture_classifier = GestureClassifier()
+            adaptive_enabled = bool(config.get('adaptive_gesture.enabled', True))
+            custom_matcher: AdaptiveGestureMatcher | None = None
+            custom_confirmation: MultiFrameGestureConfirmation | None = None
+
+            if adaptive_enabled:
+                configured_store_path = str(config.get('adaptive_gesture.store_path') or 'config/custom_gestures.json')
+                resolved_store_path = Path(configured_store_path)
+                if not resolved_store_path.is_absolute():
+                    resolved_store_path = Path(__file__).parent.parent / resolved_store_path
+
+                custom_store = CustomGestureStore(resolved_store_path)
+                custom_matcher = AdaptiveGestureMatcher(
+                    store=custom_store,
+                    threshold=float(config.get('adaptive_gesture.match_threshold') or 0.12),
+                )
+                custom_confirmation = MultiFrameGestureConfirmation(
+                    confirm_frames=int(config.get('adaptive_gesture.confirm_frames') or 4)
+                )
 
             activation_manager = ActivationManager(
                 open_palm_duration   = config.get('activation.open_palm_duration'),
@@ -275,10 +299,13 @@ class WorkerThread(QThread):
                 gesture: str | None = None
                 confidence          = 0.0
                 ui_gesture_text = 'Gesture unclear'
+                custom_match = None
+                custom_action: str | None = None
 
                 # Prefer right hand; fall back to left
                 hand_data = hands_info.get('right') or hands_info.get('left')
                 if hand_data:
+                    state.set_landmarks(hand_data.get('landmarks'))
                     confidence = float(hand_data.get('confidence', 0.0))
 
                     if confidence < low_conf_threshold:
@@ -290,31 +317,53 @@ class WorkerThread(QThread):
                             log_low_confidence(confidence)
                             last_low_conf_log = now
                     else:
-                        finger_states = hand_data['finger_states']
-                        raw_gesture = gesture_classifier.classify(finger_states)
-                        if raw_gesture == 'Unknown':
-                            gesture, _ = gesture_filter.update(None, hand_present=True)
-                            ui_gesture_text = 'Gesture unclear'
-                            last_logged_gesture = None
-                            now = time.time()
-                            if now - last_invalid_log >= error_interval:
-                                log_runtime_error('Invalid gesture detected')
-                                last_invalid_log = now
-                        else:
-                            gesture, stable_state = gesture_filter.update(raw_gesture, hand_present=True)
-                            if stable_state == 'stable' and gesture is not None:
+                        if adaptive_enabled and custom_matcher is not None and custom_confirmation is not None:
+                            custom_match = custom_matcher.match(hand_data.get('landmarks'))
+                            confirmed_name = custom_confirmation.update(
+                                custom_match.name if custom_match is not None else None
+                            )
+                            if confirmed_name and custom_match is not None and custom_match.name == confirmed_name:
+                                gesture = f'Custom: {custom_match.name}'
+                                custom_action = custom_match.action
                                 ui_gesture_text = gesture
                                 if gesture != last_logged_gesture:
                                     log_gesture_detected(gesture)
                                     last_logged_gesture = gesture
                             else:
+                                custom_action = None
+
+                        if custom_action is None:
+                            finger_states = hand_data['finger_states']
+                            raw_gesture = gesture_classifier.classify(finger_states)
+                            if raw_gesture == 'Unknown':
+                                gesture, _ = gesture_filter.update(None, hand_present=True)
                                 ui_gesture_text = 'Gesture unclear'
                                 last_logged_gesture = None
+                                now = time.time()
+                                if now - last_invalid_log >= error_interval:
+                                    log_runtime_error('Invalid gesture detected')
+                                    last_invalid_log = now
+                            else:
+                                gesture, stable_state = gesture_filter.update(raw_gesture, hand_present=True)
+                                if stable_state == 'stable' and gesture is not None:
+                                    ui_gesture_text = gesture
+                                    if gesture != last_logged_gesture:
+                                        log_gesture_detected(gesture)
+                                        last_logged_gesture = gesture
+                                else:
+                                    ui_gesture_text = 'Gesture unclear'
+                                    last_logged_gesture = None
+                        else:
+                            # Keep the predefined gesture filter clean while custom is active.
+                            gesture_filter.update(None, hand_present=True)
 
                     # Draw hand skeleton
                     hand_tracker.draw_landmarks(frame, detection_result)
                 else:
                     gesture, _ = gesture_filter.update(None, hand_present=False)
+                    state.set_landmarks(None)
+                    if custom_confirmation is not None:
+                        custom_confirmation.reset()
                     ui_gesture_text = 'No hand detected'
                     now = time.time()
                     if now - last_no_hand_log >= error_interval:
@@ -325,7 +374,12 @@ class WorkerThread(QThread):
                 # ----------------------------------------------------------
                 # Smart Mode decision
                 # ----------------------------------------------------------
-                action, mode_changed = decision_engine.process(gesture)
+                if custom_action:
+                    # Custom gestures have priority over predefined resolution.
+                    decision_engine.process(None)
+                    action, mode_changed = custom_action, False
+                else:
+                    action, mode_changed = decision_engine.process(gesture)
 
                 if mode_changed:
                     new_mode = decision_engine.current_mode
@@ -349,7 +403,13 @@ class WorkerThread(QThread):
                 # ----------------------------------------------------------
                 # Execute action  (System Mode → air mouse; others → executor)
                 # ----------------------------------------------------------
-                if decision_engine.current_mode == 'System Mode' and activation_manager.is_active:
+                if should_execute and custom_action:
+                    action_executor.execute(custom_action)
+                    label = action_executor._LABELS.get(custom_action, custom_action)
+                    state.emit_log(_ts(), 'ACTION', f'{label}  [Custom Gesture]')
+                    state.set_action_executed(custom_action)
+                    log_action_executed(label)
+                elif decision_engine.current_mode == 'System Mode' and activation_manager.is_active:
                     if hand_data:
                         am_label = air_mouse.update(
                             landmarks     = hand_data['landmarks'],

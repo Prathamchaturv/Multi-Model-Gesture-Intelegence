@@ -24,16 +24,21 @@ import json
 from pathlib import Path
 
 import bcrypt
+import cv2
+import numpy as np
 
 from PyQt6.QtCore    import Qt, QEvent, QTimer
+from PyQt6.QtGui     import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QVBoxLayout,
+    QLineEdit, QPushButton, QVBoxLayout, QStackedWidget, QWidget,
 )
 
 from ui.auth_state import auth_state
+from core.face_security import FaceSecurityManager
 
 _USERS_PATH   = Path(__file__).parent.parent / 'config' / 'users.json'
+_FACE_SECURITY_PATH = Path(__file__).parent.parent / 'config' / 'face_security.json'
 _MAX_ATTEMPTS = 3       # failed attempts before temporary lockout
 _LOCKOUT_SECS = 10      # lockout duration in seconds
 _VERSION      = 'MMGI v0.3'
@@ -107,6 +112,39 @@ def _load_users() -> dict:
 def login_is_enabled() -> bool:
     """Return True when the login screen should be shown."""
     return bool(_load_users().get('enabled', False))
+
+
+def _load_face_security_cfg() -> dict:
+    cfg = {
+        'enabled': True,
+        'authorized_image_path': 'config/authorized_face.jpg',
+        'authorized_encoding_path': 'config/authorized_face_encoding.json',
+        'similarity_threshold': 0.84,
+        'min_detection_confidence': 0.6,
+        'eval_interval_s': 0.08,
+    }
+    try:
+        with open(_FACE_SECURITY_PATH, 'r', encoding='utf-8') as fh:
+            raw = json.load(fh)
+        if isinstance(raw, dict):
+            cfg.update(raw)
+    except Exception:
+        pass
+    return cfg
+
+
+def face_login_is_enabled() -> bool:
+    return bool(_load_face_security_cfg().get('enabled', True))
+
+
+def _is_strong_face_match(
+    similarity: float | None,
+    minimum_similarity: float,
+) -> bool:
+    """Return True only for a high-confidence similarity match."""
+    if similarity is None:
+        return False
+    return float(similarity) >= float(minimum_similarity)
 
 
 # ---------------------------------------------------------------------------
@@ -297,23 +335,52 @@ class LoginWindow(QDialog):
     @staticmethod
     def should_show() -> bool:
         """Return True when the login screen is enabled in users.json."""
-        return login_is_enabled()
+        return login_is_enabled() or face_login_is_enabled()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle('MMGI — Login')
-        self.setFixedSize(420, 520)
+        self.setFixedSize(440, 620)
         self.setStyleSheet(_QSS)
         self.setWindowFlags(
             Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint
         )
 
         self._users           = _load_users()
+        self._face_cfg        = _load_face_security_cfg()
         self._attempts        = 0
         self._locked          = False
         self._pw_visible      = False
         self._countdown_val   = 0
         self._countdown_timer: QTimer | None = None
+        self._auth_mode       = 'password'
+        self._face_timer: QTimer | None = None
+        self._face_cap = None
+        self._face_security: FaceSecurityManager | None = None
+        self._face_armed = False
+        self._face_match_streak = 0
+        base_threshold = float(self._face_cfg.get('similarity_threshold', 0.84))
+        self._face_login_similarity_threshold = float(
+            self._face_cfg.get('login_similarity_threshold', max(0.93, base_threshold))
+        )
+        self._face_required_match_streak = max(
+            1,
+            int(self._face_cfg.get('login_required_match_streak', 3)),
+        )
+        self._face_guard_threshold = float(
+            self._face_cfg.get('login_lbph_confidence_threshold', 68.0)
+        )
+        self._face_similarity_override_threshold = float(
+            self._face_cfg.get('login_similarity_override_threshold', 0.975)
+        )
+        self._face_override_required_match_streak = max(
+            self._face_required_match_streak,
+            int(self._face_cfg.get('login_override_required_match_streak', 5)),
+        )
+        self._face_guard_model = None
+        self._face_guard_ready = False
+        cascade_path = Path(cv2.data.haarcascades) / 'haarcascade_frontalface_default.xml'
+        self._face_guard_cascade = cv2.CascadeClassifier(str(cascade_path))
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -368,28 +435,78 @@ class LoginWindow(QDialog):
         div.setObjectName('divider')
         lay.addWidget(div)
 
-        lay.addSpacing(24)      # title section -> inputs: 24 px
+        lay.addSpacing(16)
 
-        # -- Username ----------------------------------------------------
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(8)
+        self._pw_mode_btn = QPushButton('User-Password')
+        self._face_mode_btn = QPushButton('Face Recognition')
+        for btn in (self._pw_mode_btn, self._face_mode_btn):
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(34)
+            btn.setStyleSheet(
+                'QPushButton { background:#111630; color:#99aacc; border:1px solid #1e2a45; border-radius:8px; font-size:12px; font-weight:600; }'
+                'QPushButton:hover { border:1px solid #00e5ff; color:#00e5ff; }'
+            )
+        self._pw_mode_btn.clicked.connect(lambda: self._select_auth_mode('password'))
+        self._face_mode_btn.clicked.connect(lambda: self._select_auth_mode('face'))
+        mode_row.addWidget(self._pw_mode_btn)
+        mode_row.addWidget(self._face_mode_btn)
+        lay.addLayout(mode_row)
+
+        lay.addSpacing(14)
+
+        self._auth_stack = QStackedWidget()
+
+        # -- Password panel ---------------------------------------------
+        pw_panel = QWidget()
+        pw_lay = QVBoxLayout(pw_panel)
+        pw_lay.setContentsMargins(0, 0, 0, 0)
+        pw_lay.setSpacing(0)
+
         u_lbl = QLabel('Username')
         u_lbl.setObjectName('field_lbl')
-        lay.addWidget(u_lbl)
-        lay.addSpacing(5)
+        pw_lay.addWidget(u_lbl)
+        pw_lay.addSpacing(5)
 
         self._username_edit = QLineEdit()
         self._username_edit.setPlaceholderText('Enter username')
         self._username_edit.returnPressed.connect(self._on_login)
-        lay.addWidget(self._username_edit)
+        pw_lay.addWidget(self._username_edit)
 
-        lay.addSpacing(16)      # between fields: 16 px
+        pw_lay.addSpacing(16)
 
-        # -- Password ----------------------------------------------------
         p_lbl = QLabel('Password')
         p_lbl.setObjectName('field_lbl')
-        lay.addWidget(p_lbl)
-        lay.addSpacing(5)
+        pw_lay.addWidget(p_lbl)
+        pw_lay.addSpacing(5)
+        pw_lay.addWidget(self._build_pw_container())
 
-        lay.addWidget(self._build_pw_container())
+        # -- Face panel --------------------------------------------------
+        face_panel = QWidget()
+        face_lay = QVBoxLayout(face_panel)
+        face_lay.setContentsMargins(0, 0, 0, 0)
+        face_lay.setSpacing(8)
+
+        self._face_preview = QLabel('Camera preview not started')
+        self._face_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._face_preview.setFixedHeight(220)
+        self._face_preview.setStyleSheet('background:#0b1028; border:1px solid #1e2a45; border-radius:10px; color:#6677aa;')
+        face_lay.addWidget(self._face_preview)
+
+        self._face_status_lbl = QLabel('Press "Login with Face" and look at camera.')
+        self._face_status_lbl.setWordWrap(True)
+        self._face_status_lbl.setStyleSheet('color:#99aacc; font-size:11px;')
+        face_lay.addWidget(self._face_status_lbl)
+
+        self._face_login_btn = QPushButton('Login with Face')
+        self._face_login_btn.setObjectName('login_btn')
+        self._face_login_btn.clicked.connect(self._on_face_login)
+        face_lay.addWidget(self._face_login_btn)
+
+        self._auth_stack.addWidget(pw_panel)
+        self._auth_stack.addWidget(face_panel)
+        lay.addWidget(self._auth_stack)
 
         lay.addSpacing(10)
 
@@ -401,7 +518,7 @@ class LoginWindow(QDialog):
         self._msg_label.setFixedHeight(20)
         lay.addWidget(self._msg_label)
 
-        lay.addSpacing(20)      # fields -> button: 20 px
+        lay.addSpacing(8)
 
         # -- Login button ------------------------------------------------
         self._login_btn = QPushButton('Login')
@@ -421,6 +538,7 @@ class LoginWindow(QDialog):
         self.setTabOrder(self._username_edit, self._pw_edit)
         self.setTabOrder(self._pw_edit, self._eye_btn)
         self.setTabOrder(self._eye_btn, self._login_btn)
+        self._select_auth_mode('password')
 
     def _build_pw_container(self) -> QFrame:
         """Return a styled frame containing the password field + eye toggle."""
@@ -468,7 +586,10 @@ class LoginWindow(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        QTimer.singleShot(0, self._username_edit.setFocus)
+        if self._auth_mode == 'password':
+            QTimer.singleShot(0, self._username_edit.setFocus)
+        else:
+            self._start_face_stream()
 
     # ------------------------------------------------------------------
     # Password visibility toggle
@@ -483,11 +604,246 @@ class LoginWindow(QDialog):
             self._pw_edit.setEchoMode(QLineEdit.EchoMode.Password)
             self._eye_btn.setText('◉')   # filled circle  = hidden
 
+    def _select_auth_mode(self, mode: str) -> None:
+        self._auth_mode = mode
+        is_pw = mode == 'password'
+        self._auth_stack.setCurrentIndex(0 if is_pw else 1)
+        self._login_btn.setVisible(is_pw)
+
+        if is_pw:
+            self._pw_mode_btn.setStyleSheet(
+                'QPushButton { background:#00bfd4; color:#07091c; border:1px solid #00e5ff; border-radius:8px; font-size:12px; font-weight:700; }'
+            )
+            self._face_mode_btn.setStyleSheet(
+                'QPushButton { background:#111630; color:#99aacc; border:1px solid #1e2a45; border-radius:8px; font-size:12px; font-weight:600; }'
+                'QPushButton:hover { border:1px solid #00e5ff; color:#00e5ff; }'
+            )
+            self._stop_face_stream()
+            self._face_armed = False
+            self._msg_label.setText('')
+            self._username_edit.setFocus()
+            return
+
+        self._face_mode_btn.setStyleSheet(
+            'QPushButton { background:#00bfd4; color:#07091c; border:1px solid #00e5ff; border-radius:8px; font-size:12px; font-weight:700; }'
+        )
+        self._pw_mode_btn.setStyleSheet(
+            'QPushButton { background:#111630; color:#99aacc; border:1px solid #1e2a45; border-radius:8px; font-size:12px; font-weight:600; }'
+            'QPushButton:hover { border:1px solid #00e5ff; color:#00e5ff; }'
+        )
+        self._start_face_stream()
+
+    def _start_face_stream(self) -> None:
+        if not bool(self._face_cfg.get('enabled', True)):
+            self._face_login_btn.setEnabled(False)
+            self._face_status_lbl.setText('Face login is disabled in settings.')
+            return
+
+        if self._face_cap is None:
+            self._face_cap = cv2.VideoCapture(0)
+        if self._face_timer is None:
+            self._face_timer = QTimer(self)
+            self._face_timer.setInterval(120)
+            self._face_timer.timeout.connect(self._on_face_tick)
+
+        if self._face_security is None:
+            self._face_security = FaceSecurityManager(
+                enabled=True,
+                authorized_image_path=str(self._face_cfg.get('authorized_image_path', 'config/authorized_face.jpg')),
+                authorized_encoding_path=str(self._face_cfg.get('authorized_encoding_path', 'config/authorized_face_encoding.json')),
+                similarity_threshold=float(self._face_cfg.get('similarity_threshold', 0.84)),
+                min_detection_confidence=float(self._face_cfg.get('min_detection_confidence', 0.6)),
+                eval_interval_s=float(self._face_cfg.get('eval_interval_s', 0.08)),
+            )
+        self._prepare_face_guard_model()
+
+        self._face_login_btn.setEnabled(True)
+        if self._face_timer is not None and not self._face_timer.isActive():
+            self._face_timer.start()
+
+    def _prepare_face_guard_model(self) -> None:
+        self._face_guard_ready = False
+        self._face_guard_model = None
+
+        if not hasattr(cv2, 'face') or not hasattr(cv2.face, 'LBPHFaceRecognizer_create'):
+            return
+        if self._face_guard_cascade.empty():
+            return
+
+        root = Path(__file__).parent.parent
+        authorized_path = Path(str(self._face_cfg.get('authorized_image_path', 'config/authorized_face.jpg')))
+        if not authorized_path.is_absolute():
+            authorized_path = root / authorized_path
+        if not authorized_path.exists():
+            return
+
+        ref_img = cv2.imread(str(authorized_path))
+        if ref_img is None:
+            return
+
+        ref_face = self._extract_face_for_guard(ref_img)
+        if ref_face is None:
+            return
+
+        model = cv2.face.LBPHFaceRecognizer_create(radius=1, neighbors=8, grid_x=8, grid_y=8)
+        aug_1 = cv2.convertScaleAbs(ref_face, alpha=1.0, beta=8)
+        aug_2 = cv2.convertScaleAbs(ref_face, alpha=0.92, beta=-4)
+        images = [ref_face, aug_1, aug_2]
+        labels = np.array([1, 1, 1], dtype=np.int32)
+        model.train(images, labels)
+
+        self._face_guard_model = model
+        self._face_guard_ready = True
+
+    def _extract_face_for_guard(self, frame_bgr):
+        if frame_bgr is None or self._face_guard_cascade.empty():
+            return None
+
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        faces = self._face_guard_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.12,
+            minNeighbors=5,
+            minSize=(44, 44),
+        )
+        if len(faces) == 0:
+            return None
+
+        x, y, w, h = max(faces, key=lambda rect: rect[2] * rect[3])
+        x1 = max(0, int(x))
+        y1 = max(0, int(y))
+        x2 = min(gray.shape[1], int(x + w))
+        y2 = min(gray.shape[0], int(y + h))
+        roi = gray[y1:y2, x1:x2]
+        if roi is None or roi.size == 0:
+            return None
+
+        roi = cv2.resize(roi, (128, 128), interpolation=cv2.INTER_AREA)
+        roi = cv2.equalizeHist(roi)
+        return roi
+
+    def _stop_face_stream(self) -> None:
+        if self._face_timer is not None and self._face_timer.isActive():
+            self._face_timer.stop()
+        if self._face_cap is not None:
+            self._face_cap.release()
+            self._face_cap = None
+        if self._face_security is not None:
+            self._face_security.close()
+            self._face_security = None
+
+    def _on_face_login(self) -> None:
+        if not bool(self._face_cfg.get('enabled', True)):
+            self._face_status_lbl.setText('Face login is disabled. Enable it from Settings.')
+            return
+        if not self._face_guard_ready or self._face_guard_model is None:
+            self._face_status_lbl.setText('Face guard not ready. Re-capture authorized face from Settings.')
+            return
+        if self._face_security is None or not self._face_security.has_reference:
+            self._face_status_lbl.setText('No authorized face enrolled yet. Use Settings -> Security to capture face.')
+            return
+        self._face_armed = True
+        self._face_match_streak = 0
+        self._face_status_lbl.setText('Scanning... keep your face centered and well lit.')
+
+    def _on_face_tick(self) -> None:
+        if self._face_cap is None or self._face_security is None:
+            return
+
+        ok, frame = self._face_cap.read()
+        if not ok or frame is None:
+            self._face_status_lbl.setText('Camera unavailable. Please check webcam access.')
+            return
+
+        frame = cv2.flip(frame, 1)
+        result = self._face_security.evaluate(frame)
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+        pix = QPixmap.fromImage(qimg).scaled(
+            self._face_preview.width(),
+            self._face_preview.height(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._face_preview.setPixmap(pix)
+
+        if 'No Authorized Face Registered' in result.status_text:
+            self._face_status_lbl.setText('No authorized face enrolled yet. Use Settings -> Security to capture face.')
+            self._face_armed = False
+            self._face_match_streak = 0
+            return
+
+        strong_match = result.is_authorized and _is_strong_face_match(
+            result.similarity,
+            self._face_login_similarity_threshold,
+        )
+
+        if not self._face_armed:
+            if strong_match:
+                self._face_status_lbl.setText('Authorized face detected. Press "Login with Face" to continue.')
+            else:
+                self._face_status_lbl.setText(result.status_text)
+            self._face_match_streak = 0
+            return
+
+        if strong_match:
+            if self._face_guard_model is None:
+                self._face_match_streak = 0
+                self._face_status_lbl.setText('Face guard unavailable. Try restarting after re-enrolling face.')
+                return
+
+            guard_face = self._extract_face_for_guard(frame)
+            if guard_face is None:
+                self._face_match_streak = 0
+                self._face_status_lbl.setText('Face not clear for verification. Keep face centered.')
+                return
+
+            predicted_label, confidence = self._face_guard_model.predict(guard_face)
+            lbph_ok = predicted_label == 1 and float(confidence) <= self._face_guard_threshold
+            similarity_override_ok = (
+                result.similarity is not None
+                and float(result.similarity) >= self._face_similarity_override_threshold
+            )
+            if not lbph_ok and not similarity_override_ok:
+                self._face_match_streak = 0
+                self._face_status_lbl.setText('Face not authorized. Access denied.')
+                return
+
+            self._face_match_streak += 1
+            required = self._face_required_match_streak if lbph_ok else self._face_override_required_match_streak
+            if self._face_match_streak < required:
+                if lbph_ok:
+                    self._face_status_lbl.setText(
+                        f'Verifying identity... {self._face_match_streak}/{required}'
+                    )
+                else:
+                    self._face_status_lbl.setText(
+                        f'High similarity detected. Extra verification... {self._face_match_streak}/{required}'
+                    )
+                return
+
+            auth_state.set_authenticated('face-user')
+            self._face_status_lbl.setText('Access granted by face recognition.')
+            self._face_armed = False
+            self._face_match_streak = 0
+            QTimer.singleShot(250, self.accept)
+            return
+
+        self._face_match_streak = 0
+        if result.face_detected:
+            self._face_status_lbl.setText('Face not authorized. Access denied.')
+        else:
+            self._face_status_lbl.setText(result.status_text)
+
     # ------------------------------------------------------------------
     # Login flow
     # ------------------------------------------------------------------
 
     def _on_login(self) -> None:
+        if self._auth_mode != 'password':
+            return
         if self._locked:
             return
 
@@ -588,3 +944,7 @@ class LoginWindow(QDialog):
         self._msg_label.setText('')
         self._pw_edit.clear()
         self._pw_edit.setFocus()
+
+    def done(self, result: int) -> None:
+        self._stop_face_stream()
+        super().done(result)

@@ -60,6 +60,24 @@ class Config:
             'similarity_threshold': 0.84,
             'min_detection_confidence': 0.6,
             'eval_interval_s': 0.08,
+            'away_delay_s': 2.5,
+            'return_confirm_s': 0.7,
+        },
+        'voice_control': {
+            'enabled': True,
+            'listen_timeout_s': 1.2,
+            'phrase_time_limit_s': 2.0,
+            'energy_threshold': 250,
+            'fusion_command_ttl_s': 2.5,
+            'required_actions': ['play_pause', 'mute'],
+            'action_voice_map': {
+                'play_pause': ['play_song', 'pause'],
+                'mute': ['mute'],
+                'next_track': ['next_track'],
+                'prev_track': ['previous_track'],
+                'volume_up': ['volume_up'],
+                'volume_down': ['volume_down'],
+            },
         },
     }
 

@@ -121,7 +121,7 @@ gesture is interpreted.
 |---|---|---|
 | App Mode | Three Fingers held 1 s | Application control |
 | Media Mode | Three Fingers held 1 s | Media playback |
-| System Mode | Three Fingers held 1 s | Air Mouse and cursor control |
+| System Mode | Three Fingers held 1 s | Voice command control |
 
 - **Mode switch trigger**: Three Fingers held continuously for 1 second (10-frame stability
   gate + 2.0 s post-switch cooldown to prevent immediate re-trigger)
@@ -273,16 +273,16 @@ Example fusion:
 │                                          │  · action lookup      │     │
 │                                          └───────────────────────┘     │
 │                                                      │                  │
-│                              ┌───────────────────────┤                 │
-│                              ▼                       ▼                 │
-│                   ┌──────────────────┐   ┌───────────────────────┐    │
-│                   │ActivationManager │   │  SystemModeEngine     │    │
-│                   │ (safety gate)    │   │  AirMouseController   │    │
-│                   └──────────────────┘   └───────────────────────┘    │
-│                              │                       │                 │
-│                              ▼                       ▼                 │
-│                       ActionExecutor          Win32 ctypes             │
-│                       (pyautogui)             mouse_event / SetCursorPos│
+│                              │                                         │
+│                              ▼                                         │
+│                   ┌──────────────────┐                                 │
+│                   │ActivationManager │                                 │
+│                   │ (safety gate)    │                                 │
+│                   └──────────────────┘                                 │
+│                              │                                         │
+│                              ▼                                         │
+│                       ActionExecutor                                   │
+│                       (pyautogui)                                      │
 │                                                                         │
 │  SharedState.set_*() ─────────────────────────────────▶ UI panels      │
 │  frame_ready.emit(QImage) ────────────────────────▶ VisionPanel        │
@@ -294,12 +294,11 @@ Example fusion:
 ```
 Camera frame (BGR)
   └─▶ HandTracker           → NormalizedLandmarkList (21 points) + confidence
-        └─▶ GestureClassifier → gesture name string  (e.g. "Three Fingers")
-              └─▶ DecisionEngine → action key string  OR  mode switch event
-                    ├─▶ ActivationManager  → ACTIVE / INACTIVE state
-                    ├─▶ ActionExecutor     → pyautogui.hotkey(...)
-                    ├─▶ SystemModeEngine   → cursor move / click / scroll
-                    └─▶ SharedState        → pyqtSignals → UI panels (real-time)
+    └─▶ GestureClassifier → gesture name string  (e.g. "Three Fingers")
+      └─▶ DecisionEngine → action key string  OR  mode switch event
+        ├─▶ ActivationManager  → ACTIVE / INACTIVE state
+        ├─▶ ActionExecutor     → pyautogui.hotkey(...)
+        └─▶ SharedState        → pyqtSignals → UI panels (real-time)
 ```
 
 ### Layer Responsibilities
@@ -312,7 +311,7 @@ Camera frame (BGR)
 | Decision | `engine/decision_engine.py` | Mode state machine, gesture→action lookup, stability tracking |
 | Safety | `engine/activation_manager.py` | Open Palm hold-to-activate, Fist-to-deactivate gate |
 | Execution | `engine/action_executor.py` | `pyautogui` keyboard and media key dispatch |
-| Air Mouse | `core/system_mode_engine.py` | EMA cursor tracking, Win32 click/scroll, rising-edge detection |
+| System Voice | `core/voice_control.py` | Speech recognition, normalization, and command token emission |
 | State Bus | `ui/shared_state.py` | `QObject` reactive store; typed `pyqtSignal` per field |
 | Pipeline | `ui/worker_thread.py` | Background `QThread` running the full per-frame loop |
 | Dashboard | `ui/ui.py` | PyQt6 `QMainWindow` + all panels + QSS stylesheet |
@@ -336,7 +335,7 @@ MMGI/
 │   ├── camera.py                  # cv2.VideoCapture wrapper
 │   ├── hand_tracking.py           # MediaPipe HandLandmarker Tasks API wrapper
 │   ├── gesture_classifier.py      # Finger-state vector → gesture name (rule-based)
-│   └── system_mode_engine.py      # AirMouseController — EMA cursor, Win32 clicks
+│   └── voice_control.py           # Voice command listener + phrase normalization
 │
 ├── engine/                        # Decision and execution layer
 │   ├── activation_manager.py      # Safety gate: hold Open Palm = ACTIVE
@@ -402,7 +401,7 @@ need to be compiled from source.
 
 - Python 3.10 or later
 - A working webcam (USB or built-in, any resolution ≥ 480p)
-- Windows 10 / 11 (Air Mouse uses Win32 calls; App Mode and Media Mode are cross-platform)
+- Windows 10 / 11 recommended (voice and automation features validated on Windows)
 
 ### Steps
 
@@ -449,36 +448,51 @@ python main.py
 python main.py --headless
 ```
 
-### Face Security Setup (System Mode)
+### Face Security Setup (Login)
 
-1. Place an authorized face image at `config/authorized_face.jpg`.
-2. Tune thresholds in `config/face_security.json` if needed.
-3. Run `python main.py` and switch to `System Mode`.
-4. Confirm dashboard feedback shows either `User Recognized` or `Unknown User`.
+1. Open the **Settings** tab in MMGI.
+2. Under **Security**, enable **Face Security**.
+3. Click **Activate + Capture Authorized Face** while your face is visible in the camera.
+4. Restart MMGI once to apply the captured face encoding.
+5. Use the `Face Recognition` option in login to authenticate with your enrolled face.
 
-If no authorized face reference is available, System Mode remains locked by design.
+If no authorized face reference is available, face login is blocked by design.
 
-Presence tuning in `config/face_security.json`:
-- `away_delay_s`: seconds with no visible face before pause (default 2.5)
-- `return_confirm_s`: seconds of stable return before resume (default 0.7)
+Login hardening controls in `config/face_security.json`:
+- `login_similarity_threshold`: first-stage similarity gate (default 0.93)
+- `login_lbph_confidence_threshold`: second-stage LBPH distance gate (default 68.0, lower = stricter)
+- `login_required_match_streak`: consecutive authorized frames required before access (default 3)
+- `login_similarity_override_threshold`: very-high similarity fallback gate (default 0.975)
+- `login_override_required_match_streak`: extra frames required when fallback gate is used (default 5)
 
-### Voice + Gesture Fusion Setup (Media Mode)
+### Voice Command Setup (System Mode)
 
 Configure `config/voice_control.json`:
-- `required_actions`: Media actions that need both gesture and voice
-- `action_voice_map`: allowed voice command tokens per action
-- `fusion_command_ttl_s`: max delay between voice and gesture
+- `enabled`: enable/disable microphone listener
+- `system_mode_only`: keep voice command execution limited to System Mode
+- `system_mode_voice_actions`: map recognized voice tokens to action keys
 
 Example spoken commands recognized:
-- "play song", "pause", "mute", "volume up", "volume down", "next track", "previous track"
+- "open brave", "open apple music", "open youtube", "close window", "switch tab", "scroll down", "play song", "pause", "mute", "volume up", "volume down", "next track", "previous track"
+
+Live voice status hints in dashboard:
+- `Mic Active - Speak Command`: microphone capture backend is active.
+- `Heard: ...`: speech was recognized but not mapped to an action token.
+- `Voice Error: ...`: microphone/API/backend issue requiring configuration or permission fix.
 
 ### Quick Usage Checklist
 
 1. Ensure webcam access is available to Python.
-2. Launch with `python main.py` and complete login when enabled.
-3. Hold **Open Palm** for 2 seconds to activate the controller.
-4. Hold **Three Fingers** for 1 second to switch App / Media / System modes.
-5. Use mode-specific gestures from the reference table below.
+2. Launch with `python main.py` and complete login.
+3. Choose one login option:
+  - `User-Password` (username/password)
+  - `Face Recognition` (camera-based face login)
+4. If using face login first time, go to `Settings -> Security` after password login,
+  enable Face Security, and capture your authorized face.
+5. Restart MMGI once so the newly captured face reference is applied.
+6. Hold **Open Palm** for 2 seconds to activate the controller.
+7. Hold **Three Fingers** for 1 second to switch App / Media / System modes.
+8. Use mode-specific gestures from the reference table below.
 
 ### Activation Sequence
 
@@ -515,15 +529,11 @@ Example spoken commands recognized:
 | 👍 Thumbs Up | Volume Up |
 | 🤙 Pinky | Volume Down |
 
-### System Mode — Air Mouse
+### System Mode
 
 | Gesture | Action |
 |---|---|
-| ☝️ One Finger | Move cursor |
-| ✌️ Two Fingers | Scroll |
-| 🤙 Pinky | Left click |
-| 🤘 Ring and Pinky | Right click |
-| 👍 Thumbs Up | Double-click |
+| Voice Commands | Open Brave / Open YouTube / Close Window / Switch Tab / Scroll Down |
 
 ### Universal Gestures (all modes)
 
@@ -554,7 +564,7 @@ python -m pytest tests/test_mode_switching.py -v
 | Test File | Class Under Test | Cases | What is Verified |
 |---|---|---|---|
 | `test_gesture_classifier.py` | `GestureClassifier` | 14 | All 10 named gestures, edge cases, Unknown fallback |
-| `test_mode_switching.py` | `DecisionEngine`, `AirMouseController` | 31 | Mode transitions, stability gate, cooldown, debounce, hot-reload, action lookup |
+| `test_mode_switching.py` | `DecisionEngine` | 31 | Mode transitions, stability gate, cooldown, debounce, hot-reload, action lookup |
 | `test_action_executor.py` | `ActionExecutor` | 16 | Label completeness, action dispatch, cooldown behavior, feedback, edge cases |
 | `test_logging.py` | `utils.logger` | 1 | Runtime log file creation and write path validation |
 
@@ -641,12 +651,11 @@ and pattern-matches it against a hand-authored lookup table. This makes the clas
 fully deterministic, immediately portable, transparent in failure mode (misclassified
 gestures always map to "Unknown"), and trivially extendable without retraining.
 
-### EMA-Smoothed Air Mouse Without External Libraries
+### Voice-First System Mode
 
-The cursor control system derives pointer position directly from hand landmark coordinates,
-applies an Exponential Moving Average to smooth jitter, applies a dead-zone to suppress
-drift, and dispatches Win32 mouse events via `ctypes` — with zero dependency on any
-external mouse automation library.
+System Mode executes spoken commands (for example: open browser, switch tab,
+close window) through a normalization layer plus action mapping, so System Mode
+control remains hands-free without cursor tracking.
 
 ### Reactive UI via PyQt6 Signal Bus
 

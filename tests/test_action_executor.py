@@ -28,6 +28,7 @@ class TestActionExecutorLabels(unittest.TestCase):
     def test_all_expected_keys_have_labels(self) -> None:
         expected = [
             'open_brave', 'open_apple_music',
+            'open_youtube', 'close_window', 'switch_tab', 'scroll_down',
             'next_track', 'prev_track', 'play_pause',
             'volume_up', 'volume_down', 'mute',
         ]
@@ -65,6 +66,26 @@ class TestActionExecutorExecution(unittest.TestCase):
         with patch.object(self.executor, '_launch_store_app') as mock_launch:
             self.executor.execute('open_apple_music')
         mock_launch.assert_called_once()
+
+    def test_execute_open_youtube_calls_open_url(self) -> None:
+        with patch.object(self.executor, '_open_url') as mock_open:
+            self.executor.execute('open_youtube')
+        mock_open.assert_called_once_with('https://www.youtube.com')
+
+    def test_execute_close_window_calls_hotkey(self) -> None:
+        with patch.object(self.executor, '_hotkey') as mock_hotkey:
+            self.executor.execute('close_window')
+        mock_hotkey.assert_called_once_with('alt', 'f4')
+
+    def test_execute_switch_tab_calls_hotkey(self) -> None:
+        with patch.object(self.executor, '_hotkey') as mock_hotkey:
+            self.executor.execute('switch_tab')
+        mock_hotkey.assert_called_once_with('ctrl', 'tab')
+
+    def test_execute_scroll_down_calls_scroll(self) -> None:
+        with patch.object(self.executor, '_scroll') as mock_scroll:
+            self.executor.execute('scroll_down')
+        mock_scroll.assert_called_once_with(-420)
 
     def test_execute_records_last_action(self) -> None:
         with patch.object(self.executor, '_launch'):

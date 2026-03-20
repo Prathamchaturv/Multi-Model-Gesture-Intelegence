@@ -1143,6 +1143,8 @@ class GestureGuideCard(QFrame):
         first = True
         for mode in modes_to_show:
             gestures = data.get(mode, {})
+            if mode == 'System Mode' and not gestures:
+                gestures = {'Voice Command': 'Voice Command'}
             if not gestures:
                 continue
             colour = _MODE_COLOUR.get(mode, ACCENT)
@@ -1838,6 +1840,14 @@ class HelpGuidePanel(QWidget):
                 '3. Wait for the mode label to update before your next command.',
             ],
         ))
+        self._content_lay.addWidget(self._instruction_card(
+            'New Features (Latest)',
+            [
+                '1. Login supports Face Recognition along with User-Password.',
+                '2. In Settings -> Security, enable Face Security and capture your authorized face.',
+                '3. In System Mode, use Voice Command for actions like Open Brave, Open YouTube, Close Window, Switch Tab, and Scroll Down.',
+            ],
+        ))
 
         self._mapping_title = QLabel('CURRENT GESTURE MAPPING')
         self._mapping_title.setStyleSheet(
@@ -1891,6 +1901,10 @@ class HelpGuidePanel(QWidget):
         found_any = False
         for mode in modes_to_show:
             gestures = data.get(mode, {})
+            if mode == 'System Mode' and not gestures:
+                gestures = {
+                    'Voice Command': 'Open Brave / Open YouTube / Close Window / Switch Tab / Scroll Down'
+                }
             if not gestures:
                 continue
             found_any = True

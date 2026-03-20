@@ -1,8 +1,8 @@
 """
 Module: worker_thread.py
 Description: Background QThread that owns the full per-frame gesture pipeline
-             — reads camera frames, runs AI inference, resolves actions, drives
-             the Air Mouse, and emits QImage frames to the dashboard.
+             — reads camera frames, runs AI inference, resolves actions, and
+             emits QImage frames to the dashboard.
 Author: Pratham Chaturvedi
 
 ui/worker_thread.py - MMGI Pipeline Worker (QThread)
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import time
+import threading
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -46,12 +47,9 @@ from core.adaptive_gesture_learning import (
     CustomGestureStore,
     MultiFrameGestureConfirmation,
 )
-from core.face_security          import FaceSecurityManager
 from core.voice_control          import VoiceCommandListener
-from core.system_mode_engine     import AirMouseController
 from engine.activation_manager   import ActivationManager
 from engine.decision_engine      import DecisionEngine
-from engine.multimodal_fusion    import MultiModalFusionEngine
 from engine.action_executor      import ActionExecutor
 from utils.fps_counter           import FPSCounter
 from utils.config                import Config
@@ -138,33 +136,6 @@ def _ts() -> str:
     return datetime.now().strftime('%H:%M:%S')
 
 
-def _load_face_security_settings(config: Config) -> dict:
-    """Load face-security settings from config/face_security.json when present."""
-    settings = {
-        'enabled': bool(config.get('face_security.enabled', True)),
-        'authorized_image_path': str(config.get('face_security.authorized_image_path', 'config/authorized_face.jpg')),
-        'authorized_encoding_path': str(config.get('face_security.authorized_encoding_path', 'config/authorized_face_encoding.json')),
-        'similarity_threshold': float(config.get('face_security.similarity_threshold', 0.84)),
-        'min_detection_confidence': float(config.get('face_security.min_detection_confidence', 0.6)),
-        'eval_interval_s': float(config.get('face_security.eval_interval_s', 0.08)),
-        'away_delay_s': float(config.get('face_security.away_delay_s', 2.5)),
-        'return_confirm_s': float(config.get('face_security.return_confirm_s', 0.7)),
-    }
-    path = Path(__file__).parent.parent / 'config' / 'face_security.json'
-    if not path.exists():
-        return settings
-
-    try:
-        with open(path, 'r', encoding='utf-8') as fh:
-            raw = json.load(fh)
-    except Exception:
-        return settings
-
-    if isinstance(raw, dict):
-        settings.update(raw)
-    return settings
-
-
 def _load_voice_control_settings(config: Config) -> dict:
     """Load voice-control settings from config/voice_control.json when present."""
     settings = {
@@ -172,15 +143,22 @@ def _load_voice_control_settings(config: Config) -> dict:
         'listen_timeout_s': float(config.get('voice_control.listen_timeout_s', 1.2)),
         'phrase_time_limit_s': float(config.get('voice_control.phrase_time_limit_s', 2.0)),
         'energy_threshold': int(config.get('voice_control.energy_threshold', 250)),
-        'fusion_command_ttl_s': float(config.get('voice_control.fusion_command_ttl_s', 2.5)),
-        'required_actions': list(config.get('voice_control.required_actions', ['play_pause', 'mute'])),
-        'action_voice_map': dict(config.get('voice_control.action_voice_map', {
-            'play_pause': ['play_song', 'pause'],
-            'mute': ['mute'],
-            'next_track': ['next_track'],
-            'prev_track': ['previous_track'],
-            'volume_up': ['volume_up'],
-            'volume_down': ['volume_down'],
+        'recognition_language': str(config.get('voice_control.recognition_language', 'en-IN')),
+        'system_mode_only': bool(config.get('voice_control.system_mode_only', True)),
+        'system_mode_voice_actions': dict(config.get('voice_control.system_mode_voice_actions', {
+            'open_brave': 'open_brave',
+            'open_apple_music': 'open_apple_music',
+            'open_youtube': 'open_youtube',
+            'close_window': 'close_window',
+            'switch_tab': 'switch_tab',
+            'scroll_down': 'scroll_down',
+            'play_song': 'play_pause',
+            'pause': 'play_pause',
+            'next_track': 'next_track',
+            'previous_track': 'prev_track',
+            'volume_up': 'volume_up',
+            'volume_down': 'volume_down',
+            'mute': 'mute',
         })),
     }
 
@@ -201,6 +179,12 @@ def _load_voice_control_settings(config: Config) -> dict:
 
 def _voice_label(command: str) -> str:
     labels = {
+        'open_brave': 'Open Brave',
+        'open_apple_music': 'Open Apple Music',
+        'open_youtube': 'Open YouTube',
+        'close_window': 'Close Window',
+        'switch_tab': 'Switch Tab',
+        'scroll_down': 'Scroll Down',
         'play_song': 'Play Song',
         'pause': 'Pause',
         'next_track': 'Next Track',
@@ -284,6 +268,8 @@ class WorkerThread(QThread):
         super().__init__(parent)
         self._state   = state
         self._running = False
+        self._frame_lock = threading.Lock()
+        self._latest_frame_bgr = None
 
         # Pipeline components (created in run() so they start on the right thread)
         self._config:    Config | None = None
@@ -297,6 +283,56 @@ class WorkerThread(QThread):
         """Request the pipeline to stop."""
         self._running = False
 
+    def capture_authorized_face(self) -> tuple[bool, str]:
+        """Capture the latest camera face and save it as authorized reference image."""
+        with self._frame_lock:
+            if self._latest_frame_bgr is None:
+                return False, 'No camera frame available yet. Please wait a moment and try again.'
+            frame = self._latest_frame_bgr.copy()
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        cascade_path = Path(cv2.data.haarcascades) / 'haarcascade_frontalface_default.xml'
+        face_cascade = cv2.CascadeClassifier(str(cascade_path))
+        if face_cascade.empty():
+            return False, 'Face detector unavailable in this environment.'
+
+        faces = face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.15,
+            minNeighbors=5,
+            minSize=(40, 40),
+        )
+        if len(faces) == 0:
+            return False, 'No face detected. Position your face clearly in camera and try again.'
+
+        x, y, w, h = max(faces, key=lambda r: r[2] * r[3])
+        pad = int(min(w, h) * 0.18)
+        x1 = max(0, x - pad)
+        y1 = max(0, y - pad)
+        x2 = min(frame.shape[1], x + w + pad)
+        y2 = min(frame.shape[0], y + h + pad)
+        roi = frame[y1:y2, x1:x2]
+        if roi.size == 0:
+            return False, 'Face crop failed. Please try again.'
+
+        root = Path(__file__).parent.parent
+        img_path = root / 'config' / 'authorized_face.jpg'
+        enc_path = root / 'config' / 'authorized_face_encoding.json'
+        img_path.parent.mkdir(parents=True, exist_ok=True)
+
+        ok = cv2.imwrite(str(img_path), roi)
+        if not ok:
+            return False, 'Failed to save authorized face image.'
+
+        # Force encoding regeneration on next startup.
+        if enc_path.exists():
+            try:
+                enc_path.unlink()
+            except Exception:
+                pass
+
+        return True, 'Authorized face captured. Restart MMGI to activate face security with new enrollment.'
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -305,7 +341,6 @@ class WorkerThread(QThread):
         self._running = True
         state = self._state
         camera: Camera | None = None
-        face_security: FaceSecurityManager | None = None
         voice_listener: VoiceCommandListener | None = None
 
         try:
@@ -313,40 +348,23 @@ class WorkerThread(QThread):
             get_mmgi_logger()  # ensure logger is initialized once on worker start
             low_conf_threshold = float(config.get('hand_tracking.min_detection_confidence'))
 
-            face_cfg = _load_face_security_settings(config)
-            face_security = FaceSecurityManager(
-                enabled=bool(face_cfg.get('enabled', True)),
-                authorized_image_path=str(face_cfg.get('authorized_image_path', 'config/authorized_face.jpg')),
-                authorized_encoding_path=str(face_cfg.get('authorized_encoding_path', 'config/authorized_face_encoding.json')),
-                similarity_threshold=float(face_cfg.get('similarity_threshold', 0.84)),
-                min_detection_confidence=float(face_cfg.get('min_detection_confidence', 0.6)),
-                eval_interval_s=float(face_cfg.get('eval_interval_s', 0.08)),
-                away_delay_s=float(face_cfg.get('away_delay_s', 2.5)),
-                return_confirm_s=float(face_cfg.get('return_confirm_s', 0.7)),
-            )
-
             voice_cfg = _load_voice_control_settings(config)
             voice_listener = VoiceCommandListener(
                 enabled=bool(voice_cfg.get('enabled', True)),
                 listen_timeout_s=float(voice_cfg.get('listen_timeout_s', 1.2)),
                 phrase_time_limit_s=float(voice_cfg.get('phrase_time_limit_s', 2.0)),
                 energy_threshold=int(voice_cfg.get('energy_threshold', 250)),
+                recognition_language=str(voice_cfg.get('recognition_language', 'en-IN')),
             )
             voice_enabled_for_fusion = voice_listener.is_enabled
-            fusion_engine = MultiModalFusionEngine(
-                required_actions=(
-                    {str(x) for x in list(voice_cfg.get('required_actions', ['play_pause', 'mute']))}
-                    if voice_enabled_for_fusion
-                    else set()
-                ),
-                action_voice_map={
-                    str(k): {str(vv) for vv in vals}
-                    for k, vals in dict(voice_cfg.get('action_voice_map', {})).items()
-                },
-                command_ttl_s=float(voice_cfg.get('fusion_command_ttl_s', 2.5)),
-            )
+            voice_system_mode_only = bool(voice_cfg.get('system_mode_only', True))
+            voice_action_map = {
+                str(k): str(v)
+                for k, v in dict(voice_cfg.get('system_mode_voice_actions', {})).items()
+            }
             voice_listener.start()
             state.set_voice_command('Listening...' if voice_enabled_for_fusion else 'Voice Unavailable')
+            last_voice_error: str | None = None
 
             camera = Camera(
                 width  = config.get('camera.width'),
@@ -396,8 +414,6 @@ class WorkerThread(QThread):
                 'apple_music_aumid': config.get('apps.apple_music_aumid'),
             })
 
-            air_mouse   = AirMouseController()
-            _prev_mode  = decision_engine.current_mode
             fps_counter = FPSCounter()
             gesture_filter = GestureStabilityFilter(confirm_frames=4, min_switch_interval_s=0.25)
             last_logged_gesture: str | None = None
@@ -407,13 +423,10 @@ class WorkerThread(QThread):
 
             warning_interval = 1.5
             error_interval = 1.5
-            last_face_authorized: bool | None = None
-            was_active_before_away = False
-            last_presence_paused: bool | None = None
 
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
-            state.set_face_auth(True, 'Face Auth: Idle (System Mode Only)')
+            state.set_face_auth(True, 'Face Security: Login Only')
 
             # ----------------------------------------------------------------
             # Frame loop
@@ -427,54 +440,43 @@ class WorkerThread(QThread):
 
                 # Mirror for natural interaction
                 frame = cv2.flip(frame, 1)
+                with self._frame_lock:
+                    self._latest_frame_bgr = frame.copy()
 
                 # ----------------------------------------------------------
                 # Voice command polling (non-blocking)
                 # ----------------------------------------------------------
+                voice_event = None
                 if voice_listener is not None:
                     voice_event = voice_listener.poll_latest()
                     if voice_event is not None:
-                        fusion_engine.update_voice(voice_event.command, ts=voice_event.timestamp)
-                        voice_text = _voice_label(voice_event.command)
-                        state.set_voice_command(voice_text)
-                        state.emit_log(_ts(), 'ACTION', f'Voice command detected: {voice_text}')
+                        if voice_event.command == '__unmapped__':
+                            transcript = voice_event.transcript.strip()
+                            if len(transcript) > 48:
+                                transcript = transcript[:45] + '...'
+                            state.set_voice_command(f'Heard: {transcript}')
+                            state.emit_log(_ts(), 'SYSTEM', f'Voice heard (unmapped): {voice_event.transcript}')
+                        else:
+                            voice_text = _voice_label(voice_event.command)
+                            state.set_voice_command(voice_text)
+                            state.emit_log(_ts(), 'ACTION', f'Voice command detected: {voice_text}')
+                    elif voice_listener.last_error and voice_listener.last_error != last_voice_error:
+                        last_voice_error = voice_listener.last_error
+                        state.set_voice_command(f'Voice Error: {last_voice_error}')
+                        state.emit_log(_ts(), 'SYSTEM', f'Voice listener error: {last_voice_error}')
+                    elif voice_listener.is_enabled and voice_listener.is_ready and state.voice_command == 'Listening...':
+                        state.set_voice_command('Mic Active - Speak Command')
 
-                # ----------------------------------------------------------
-                # System Mode presence + face-security gate (early)
-                # ----------------------------------------------------------
                 face_authorized = True
-                face_status = 'Face Auth: Idle (System Mode Only)'
+                face_status = 'Face Security: Login Only'
                 user_away = False
                 mode_is_system = decision_engine.current_mode == 'System Mode'
-                if mode_is_system and face_security is not None:
-                    auth_result = face_security.evaluate(frame)
-                    face_authorized = auth_result.is_authorized
-                    face_status = auth_result.status_text
-                    user_away = auth_result.system_paused
-                    state.set_face_auth(face_authorized, face_status)
-
-                    if last_face_authorized is None or face_authorized != last_face_authorized:
-                        if face_authorized:
-                            state.emit_log(_ts(), 'SYSTEM', 'User Recognized — System Unlocked')
-                        else:
-                            state.emit_log(_ts(), 'ERROR', 'Unknown User — System Locked')
-                        last_face_authorized = face_authorized
-
-                    if last_presence_paused is None or user_away != last_presence_paused:
-                        if user_away:
-                            state.emit_log(_ts(), 'SYSTEM', 'User Away - System Paused')
-                        else:
-                            state.emit_log(_ts(), 'SYSTEM', 'User Detected - System Active')
-                        last_presence_paused = user_away
-                else:
-                    state.set_face_auth(True, face_status)
-                    last_face_authorized = None
-                    last_presence_paused = None
+                state.set_face_auth(True, face_status)
 
                 # ----------------------------------------------------------
                 # Hand detection + gesture classification
                 # ----------------------------------------------------------
-                skip_hand_processing = mode_is_system and user_away
+                skip_hand_processing = False
                 detection_result = None
                 hands_info = {}
                 if not skip_hand_processing:
@@ -550,9 +552,9 @@ class WorkerThread(QThread):
                     state.set_landmarks(None)
                     if custom_confirmation is not None:
                         custom_confirmation.reset()
-                    ui_gesture_text = 'User Away - System Paused' if skip_hand_processing else 'No hand detected'
+                    ui_gesture_text = 'No hand detected'
                     now = time.time()
-                    if (not skip_hand_processing) and now - last_no_hand_log >= error_interval:
+                    if now - last_no_hand_log >= error_interval:
                         log_runtime_error('No hand detected')
                         last_no_hand_log = now
                     last_logged_gesture = None
@@ -571,10 +573,6 @@ class WorkerThread(QThread):
                     new_mode = decision_engine.current_mode
                     state.set_mode(new_mode)
                     state.emit_log(_ts(), 'MODE', f'Switched to {new_mode}')
-                    # Reset air mouse when leaving System Mode
-                    if _prev_mode == 'System Mode' and new_mode != 'System Mode':
-                        air_mouse.reset()
-                    _prev_mode = new_mode
 
                 # Mode-switch stability bar
                 state.set_mode_stability(decision_engine.mode_stability_progress)
@@ -582,23 +580,12 @@ class WorkerThread(QThread):
                 # ----------------------------------------------------------
                 # Activation manager
                 # ----------------------------------------------------------
-                if decision_engine.current_mode == 'System Mode' and (user_away or not face_authorized):
-                    if user_away and activation_manager.is_active:
-                        was_active_before_away = True
-                    activation_manager.force_inactive(
-                        'User away in System Mode' if user_away else 'Unknown user in System Mode'
-                    )
-                    should_execute = False
-                else:
-                    if decision_engine.current_mode == 'System Mode' and was_active_before_away:
-                        activation_manager.force_active('User returned')
-                        was_active_before_away = False
-                    should_execute = activation_manager.update(gesture)
+                should_execute = activation_manager.update(gesture)
                 state.set_system_active(activation_manager.is_active)
                 state.set_cooldown(activation_manager.is_in_cooldown)
 
                 # ----------------------------------------------------------
-                # Execute action  (System Mode → air mouse; others → executor)
+                # Execute action  (voice commands in System Mode; gestures in App/Media)
                 # ----------------------------------------------------------
                 if should_execute and custom_action:
                     action_executor.execute(custom_action)
@@ -607,40 +594,28 @@ class WorkerThread(QThread):
                     state.set_action_executed(custom_action)
                     log_action_executed(label)
                 elif (
-                    decision_engine.current_mode == 'System Mode'
-                    and activation_manager.is_active
-                    and face_authorized
+                    voice_event is not None
+                    and voice_event.command != '__unmapped__'
+                    and voice_enabled_for_fusion
+                    and decision_engine.current_mode == 'System Mode'
                 ):
-                    if hand_data:
-                        am_label = air_mouse.update(
-                            landmarks     = hand_data['landmarks'],
-                            finger_states = hand_data['finger_states'],
-                            gesture       = gesture,
-                            frame_w       = frame.shape[1],
-                            frame_h       = frame.shape[0],
-                        )
-                        if am_label:
-                            state.emit_log(_ts(), 'ACTION', f'{am_label}  [System Mode]')
-                            log_action_executed(am_label)
-                elif should_execute and action:
-                    allow_action = True
-                    matched_voice: str | None = None
-                    if decision_engine.current_mode == 'Media Mode':
-                        allow_action, matched_voice = fusion_engine.resolve(
-                            action=action,
-                            mode=decision_engine.current_mode,
-                        )
+                    if (not voice_system_mode_only) or decision_engine.current_mode == 'System Mode':
+                        mapped_action = voice_action_map.get(voice_event.command)
+                    else:
+                        mapped_action = None
 
-                    if allow_action:
-                        action_executor.execute(action)
-                        label = action_executor._LABELS.get(action, action)
-                        if matched_voice:
-                            voice_label = _voice_label(matched_voice)
-                            state.emit_log(_ts(), 'ACTION', f'{label}  [Media Mode + Voice: {voice_label}]')
-                        else:
-                            state.emit_log(_ts(), 'ACTION', f'{label}  [{decision_engine.current_mode}]')
-                        state.set_action_executed(action)
+                    if mapped_action:
+                        action_executor.execute(mapped_action)
+                        label = action_executor._LABELS.get(mapped_action, mapped_action)
+                        state.emit_log(_ts(), 'ACTION', f'{label}  [System Mode Voice]')
+                        state.set_action_executed(mapped_action)
                         log_action_executed(label)
+                elif should_execute and action:
+                    action_executor.execute(action)
+                    label = action_executor._LABELS.get(action, action)
+                    state.emit_log(_ts(), 'ACTION', f'{label}  [{decision_engine.current_mode}]')
+                    state.set_action_executed(action)
+                    log_action_executed(label)
 
                 # ----------------------------------------------------------
                 # Update telemetry
@@ -671,8 +646,6 @@ class WorkerThread(QThread):
             # ---- Loop exited cleanly ---
             camera.release()
             hand_tracker.close()
-            if face_security is not None:
-                face_security.close()
             if voice_listener is not None:
                 voice_listener.stop()
             state.set_system_active(False)
@@ -690,11 +663,6 @@ class WorkerThread(QThread):
             try:
                 if camera is not None:
                     camera.release()
-            except Exception:
-                pass
-            try:
-                if face_security is not None:
-                    face_security.close()
             except Exception:
                 pass
             try:

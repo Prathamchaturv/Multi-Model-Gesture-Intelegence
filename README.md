@@ -148,12 +148,24 @@ gesture is interpreted.
 | 👍 Thumbs Up | Volume Up |
 | 🤙 Pinky | Volume Down |
 
+Media Mode now supports **multi-modal fusion (Gesture + Voice)** for selected actions.
+
+- Voice input is captured continuously using a lightweight speech recognition listener.
+- For configured actions (default: `play_pause`, `mute`), execution requires both:
+  - Matching gesture
+  - Matching voice command within a short time window
+- Partial input is ignored (gesture-only or voice-only does not execute).
+
+Example fusion:
+- Gesture: Four Fingers + Voice: "play song" -> Play / Pause action executes
+
 ### 3.5 System Mode 
 
-- Index fingertip (landmark 8) mapped to screen coordinates via a configurable edge-margin transform
+- Index fingertip (landmark 8) continuously maps to screen coordinates via a configurable edge-margin transform
+- **Pinch click**: thumb tip + index tip proximity triggers a left-click on rising edge
 - **EMA smoothing** (`α = 0.25`) applied to raw landmark coordinates to remove per-frame jitter
 - **Dead-zone filter** (4 px default) suppresses cursor drift when the hand is stationary
-- **Rising-edge detection** on all click gestures — fires once per onset, not on hold,
+- **Rising-edge detection** on pinch/click gestures — fires once per onset, not on hold,
   with a 0.5 s inter-click cooldown
 - Implemented via Win32 `ctypes` (`mouse_event`, `SetCursorPos`) — no external mouse library
 - **Face-Based Security gate (System Mode only)**:
@@ -162,6 +174,11 @@ gesture is interpreted.
   - Match -> `User Recognized` and System Mode remains available
   - Unknown / no-face -> `Unknown User` and System Mode is locked
   - Unauthorized face status overrides gesture activation in System Mode
+- **Smart Presence Detection (System Mode only)**:
+  - Presence monitor tracks whether any face remains visible
+  - If no face is seen for a delay window, MMGI pauses System Mode
+  - On return, presence must be stable briefly before resume (anti-flicker)
+  - Dashboard feedback: `User Away - System Paused` and `User Detected - System Active`
 
 ### 3.6 Activation and Safety System
 
@@ -440,6 +457,20 @@ python main.py --headless
 4. Confirm dashboard feedback shows either `User Recognized` or `Unknown User`.
 
 If no authorized face reference is available, System Mode remains locked by design.
+
+Presence tuning in `config/face_security.json`:
+- `away_delay_s`: seconds with no visible face before pause (default 2.5)
+- `return_confirm_s`: seconds of stable return before resume (default 0.7)
+
+### Voice + Gesture Fusion Setup (Media Mode)
+
+Configure `config/voice_control.json`:
+- `required_actions`: Media actions that need both gesture and voice
+- `action_voice_map`: allowed voice command tokens per action
+- `fusion_command_ttl_s`: max delay between voice and gesture
+
+Example spoken commands recognized:
+- "play song", "pause", "mute", "volume up", "volume down", "next track", "previous track"
 
 ### Quick Usage Checklist
 

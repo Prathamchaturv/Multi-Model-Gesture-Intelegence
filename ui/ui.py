@@ -509,7 +509,17 @@ class VisionPanel(QWidget):
         sep = QLabel('|')
         sep.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
 
-        action_title = QLabel('LAST ACTION')
+        voice_title = QLabel('VOICE COMMAND')
+        voice_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
+        self._voice_command_val = QLabel('—')
+        self._voice_command_val.setStyleSheet(
+            f'color: {MODE_MEDIA}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+        )
+
+        sep_action = QLabel('|')
+        sep_action.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
+
+        action_title = QLabel('FINAL ACTION')
         action_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
         self._action_executed_val = QLabel('—')
         self._action_executed_val.setStyleSheet(
@@ -529,6 +539,9 @@ class VisionPanel(QWidget):
         fb_lay.addWidget(gest_title)
         fb_lay.addWidget(self._gesture_detected_val)
         fb_lay.addWidget(sep)
+        fb_lay.addWidget(voice_title)
+        fb_lay.addWidget(self._voice_command_val)
+        fb_lay.addWidget(sep_action)
         fb_lay.addWidget(action_title)
         fb_lay.addWidget(self._action_executed_val)
         fb_lay.addWidget(sep2)
@@ -581,6 +594,7 @@ class VisionPanel(QWidget):
         s.system_active_changed.connect(self._on_active_changed)
         s.action_executed.connect(self._on_action_executed)
         s.face_auth_changed.connect(self._on_face_auth_changed)
+        s.voice_command_changed.connect(self._on_voice_command_changed)
 
     @pyqtSlot(QImage)
     def update_frame(self, image: QImage) -> None:
@@ -635,6 +649,10 @@ class VisionPanel(QWidget):
     def _on_action_executed(self, action: str) -> None:
         label = _ACTION_DISPLAY_LABELS.get(action, action)
         self._action_executed_val.setText(label if label else '—')
+
+    @pyqtSlot(str)
+    def _on_voice_command_changed(self, command_text: str) -> None:
+        self._voice_command_val.setText(command_text if command_text else '—')
 
     @pyqtSlot(bool, str)
     def _on_face_auth_changed(self, authorized: bool, status_text: str) -> None:

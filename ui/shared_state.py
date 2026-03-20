@@ -53,6 +53,7 @@ class SharedState(QObject):
     mode_stability_changed  = pyqtSignal(float)
     landmarks_changed       = pyqtSignal(object)
     face_auth_changed       = pyqtSignal(bool, str)
+    voice_command_changed   = pyqtSignal(str)
 
     # Batched update – emits a snapshot dict for panels that want everything
     snapshot_ready          = pyqtSignal(dict)
@@ -79,6 +80,7 @@ class SharedState(QObject):
         self._latest_landmarks = None
         self._face_authorized  = True
         self._face_status      = 'Face Auth: Idle'
+        self._voice_command    = ''
 
     # ------------------------------------------------------------------ getters
     @property
@@ -103,6 +105,8 @@ class SharedState(QObject):
     def face_authorized(self) -> bool:  return self._face_authorized
     @property
     def face_status(self)     -> str:   return self._face_status
+    @property
+    def voice_command(self)   -> str:   return self._voice_command
 
     # ------------------------------------------------------------------ setters
     def set_system_active(self, value: bool) -> None:
@@ -170,6 +174,13 @@ class SharedState(QObject):
         if changed:
             self.face_auth_changed.emit(self._face_authorized, self._face_status)
 
+    def set_voice_command(self, command_text: str) -> None:
+        """Broadcast latest recognized voice command."""
+        value = str(command_text)
+        if self._voice_command != value:
+            self._voice_command = value
+            self.voice_command_changed.emit(value)
+
     def emit_log(self, timestamp: str, category: str, description: str) -> None:
         """Convenience wrapper to push an activity log event."""
         self.log_event.emit(timestamp, category, description)
@@ -189,6 +200,7 @@ class SharedState(QObject):
             'mode_stability': self._mode_stability,
             'face_authorized': self._face_authorized,
             'face_status': self._face_status,
+            'voice_command': self._voice_command,
         }
 
     def _emit_snapshot(self) -> None:

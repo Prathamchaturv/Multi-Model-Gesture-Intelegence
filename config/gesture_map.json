@@ -1,5 +1,5 @@
 {
-    "_comment": "Smart Mode gesture-action mappings. Three Fingers cycles modes (App\u2192Media\u2192System\u2192App). System Mode uses air mouse \u2014 gestures are handled directly by AirMouseController, not this map.",
+    "_comment": "Smart Mode gesture-action mappings. Three Fingers cycles modes (App\u2192Media\u2192System\u2192App). System Mode gesture cursor control is disabled.",
     "mode_switch": {
         "Three Fingers": "next_mode"
     },
@@ -13,13 +13,9 @@
         "Four Fingers": "play_pause",
         "Thumbs Up": "mute"
     },
-    "_system_mode_note": "System Mode air mouse gestures (handled by AirMouseController \u2014 not action strings):",
+    "_system_mode_note": "System Mode gesture cursor control is disabled. Use System Mode voice commands.",
     "_system_mode_gestures": {
-        "One Finger": "Move cursor  (index fingertip tracks screen position)",
-        "Two Fingers": "Scroll       (vertical finger movement drives scroll wheel)",
-        "Pinky": "Left click",
-        "Ring and Pinky": "Right click",
-        "Thumbs Up": "Double-click"
+        "Voice Command": "Open Brave, Open YouTube, Close Window, Switch Tab, Scroll Down"
     },
     "System Mode": {}
 }

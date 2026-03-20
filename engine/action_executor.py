@@ -25,6 +25,7 @@ Displays a fading on-screen notification for each action executed.
 import os
 import time
 import subprocess
+import webbrowser
 import cv2
 from utils.logger import log_runtime_error
 
@@ -44,6 +45,10 @@ class ActionExecutor:
     _LABELS: dict[str, str] = {
         'open_brave':        'Launch Brave Browser',
         'open_apple_music':  'Launch Apple Music',
+        'open_youtube':      'Open YouTube',
+        'close_window':      'Close Window',
+        'switch_tab':        'Switch Tab',
+        'scroll_down':       'Scroll Down',
         'next_track':        'Next Track',
         'prev_track':        'Previous Track',
         'play_pause':        'Play / Pause',
@@ -116,6 +121,18 @@ class ActionExecutor:
             elif action == 'open_apple_music':
                 self._launch_store_app(self._apple_music_aumid)
 
+            elif action == 'open_youtube':
+                self._open_url('https://www.youtube.com')
+
+            elif action == 'close_window':
+                self._hotkey('alt', 'f4')
+
+            elif action == 'switch_tab':
+                self._hotkey('ctrl', 'tab')
+
+            elif action == 'scroll_down':
+                self._scroll(-420)
+
             elif action in self._KEY_MAP:
                 self._press(self._KEY_MAP[action])
 
@@ -185,3 +202,22 @@ class ActionExecutor:
             pyautogui.press(key)
         else:
             print(f'  [ActionExecutor] pyautogui unavailable — cannot press "{key}"')
+
+    def _hotkey(self, *keys: str) -> None:
+        """Send a keyboard shortcut via pyautogui."""
+        if _PYAUTOGUI:
+            pyautogui.hotkey(*keys)
+        else:
+            print(f'  [ActionExecutor] pyautogui unavailable — cannot trigger hotkey {keys}')
+
+    def _scroll(self, amount: int) -> None:
+        """Send a mouse-wheel scroll event via pyautogui."""
+        if _PYAUTOGUI:
+            pyautogui.scroll(amount)
+        else:
+            print(f'  [ActionExecutor] pyautogui unavailable — cannot scroll {amount}')
+
+    @staticmethod
+    def _open_url(url: str) -> None:
+        """Open a URL in the default browser."""
+        webbrowser.open(url, new=2)

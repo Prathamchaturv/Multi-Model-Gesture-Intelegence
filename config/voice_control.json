@@ -3,14 +3,21 @@
   "listen_timeout_s": 1.2,
   "phrase_time_limit_s": 2.0,
   "energy_threshold": 250,
-  "fusion_command_ttl_s": 2.5,
-  "required_actions": ["play_pause", "mute"],
-  "action_voice_map": {
-    "play_pause": ["play_song", "pause"],
-    "mute": ["mute"],
-    "next_track": ["next_track"],
-    "prev_track": ["previous_track"],
-    "volume_up": ["volume_up"],
-    "volume_down": ["volume_down"]
+  "recognition_language": "en-IN",
+  "system_mode_only": true,
+  "system_mode_voice_actions": {
+    "open_brave": "open_brave",
+    "open_apple_music": "open_apple_music",
+    "open_youtube": "open_youtube",
+    "close_window": "close_window",
+    "switch_tab": "switch_tab",
+    "scroll_down": "scroll_down",
+    "play_song": "play_pause",
+    "pause": "play_pause",
+    "next_track": "next_track",
+    "previous_track": "prev_track",
+    "volume_up": "volume_up",
+    "volume_down": "volume_down",
+    "mute": "mute"
   }
 }

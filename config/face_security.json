@@ -2,9 +2,14 @@
   "enabled": true,
   "authorized_image_path": "config/authorized_face.jpg",
   "authorized_encoding_path": "config/authorized_face_encoding.json",
-  "similarity_threshold": 0.84,
+  "similarity_threshold": 0.9,
   "min_detection_confidence": 0.6,
   "eval_interval_s": 0.08,
   "away_delay_s": 2.5,
-  "return_confirm_s": 0.7
+  "return_confirm_s": 0.7,
+  "login_similarity_threshold": 0.93,
+  "login_required_match_streak": 3,
+  "login_lbph_confidence_threshold": 68.0,
+  "login_similarity_override_threshold": 0.975,
+  "login_override_required_match_streak": 5
 }

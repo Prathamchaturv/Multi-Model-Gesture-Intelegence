@@ -28,6 +28,7 @@ error(str)           – fatal pipeline error message
 
 from __future__ import annotations
 
+import json
 import time
 from collections import deque
 from datetime import datetime
@@ -45,6 +46,7 @@ from core.adaptive_gesture_learning import (
     CustomGestureStore,
     MultiFrameGestureConfirmation,
 )
+from core.face_security          import FaceSecurityManager
 from core.system_mode_engine     import AirMouseController
 from engine.activation_manager   import ActivationManager
 from engine.decision_engine      import DecisionEngine
@@ -134,8 +136,40 @@ def _ts() -> str:
     return datetime.now().strftime('%H:%M:%S')
 
 
-def _draw_overlay(frame, gesture: str | None, mode: str,
-                  is_active: bool, fps: float) -> None:
+def _load_face_security_settings(config: Config) -> dict:
+    """Load face-security settings from config/face_security.json when present."""
+    settings = {
+        'enabled': bool(config.get('face_security.enabled', True)),
+        'authorized_image_path': str(config.get('face_security.authorized_image_path', 'config/authorized_face.jpg')),
+        'authorized_encoding_path': str(config.get('face_security.authorized_encoding_path', 'config/authorized_face_encoding.json')),
+        'similarity_threshold': float(config.get('face_security.similarity_threshold', 0.84)),
+        'min_detection_confidence': float(config.get('face_security.min_detection_confidence', 0.6)),
+        'eval_interval_s': float(config.get('face_security.eval_interval_s', 0.08)),
+    }
+    path = Path(__file__).parent.parent / 'config' / 'face_security.json'
+    if not path.exists():
+        return settings
+
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            raw = json.load(fh)
+    except Exception:
+        return settings
+
+    if isinstance(raw, dict):
+        settings.update(raw)
+    return settings
+
+
+def _draw_overlay(
+    frame,
+    gesture: str | None,
+    mode: str,
+    is_active: bool,
+    fps: float,
+    face_status: str | None = None,
+    face_authorized: bool | None = None,
+) -> None:
     """Annotate frame in-place with gesture/mode/state HUD."""
     h, w = frame.shape[:2]
 
@@ -159,6 +193,18 @@ def _draw_overlay(frame, gesture: str | None, mode: str,
     # FPS
     cv2.putText(frame, f'FPS {fps:.0f}', (w - 90, 36),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, _WHITE, 1)
+
+    if face_status:
+        face_colour = _GREEN if face_authorized else _RED
+        cv2.putText(
+            frame,
+            face_status,
+            (16, 56),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            face_colour,
+            1,
+        )
 
     # Gesture label
     if gesture:
@@ -208,11 +254,22 @@ class WorkerThread(QThread):
         self._running = True
         state = self._state
         camera: Camera | None = None
+        face_security: FaceSecurityManager | None = None
 
         try:
             config = Config()
             get_mmgi_logger()  # ensure logger is initialized once on worker start
             low_conf_threshold = float(config.get('hand_tracking.min_detection_confidence'))
+
+            face_cfg = _load_face_security_settings(config)
+            face_security = FaceSecurityManager(
+                enabled=bool(face_cfg.get('enabled', True)),
+                authorized_image_path=str(face_cfg.get('authorized_image_path', 'config/authorized_face.jpg')),
+                authorized_encoding_path=str(face_cfg.get('authorized_encoding_path', 'config/authorized_face_encoding.json')),
+                similarity_threshold=float(face_cfg.get('similarity_threshold', 0.84)),
+                min_detection_confidence=float(face_cfg.get('min_detection_confidence', 0.6)),
+                eval_interval_s=float(face_cfg.get('eval_interval_s', 0.08)),
+            )
 
             camera = Camera(
                 width  = config.get('camera.width'),
@@ -273,9 +330,11 @@ class WorkerThread(QThread):
 
             warning_interval = 1.5
             error_interval = 1.5
+            last_face_authorized: bool | None = None
 
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
+            state.set_face_auth(True, 'Face Auth: Idle (System Mode Only)')
 
             # ----------------------------------------------------------------
             # Frame loop
@@ -394,9 +453,34 @@ class WorkerThread(QThread):
                 state.set_mode_stability(decision_engine.mode_stability_progress)
 
                 # ----------------------------------------------------------
+                # System Mode face-security gate
+                # ----------------------------------------------------------
+                face_authorized = True
+                face_status = 'Face Auth: Idle (System Mode Only)'
+                if decision_engine.current_mode == 'System Mode' and face_security is not None:
+                    auth_result = face_security.evaluate(frame)
+                    face_authorized = auth_result.is_authorized
+                    face_status = auth_result.status_text
+                    state.set_face_auth(face_authorized, face_status)
+
+                    if last_face_authorized is None or face_authorized != last_face_authorized:
+                        if face_authorized:
+                            state.emit_log(_ts(), 'SYSTEM', 'User Recognized — System Unlocked')
+                        else:
+                            state.emit_log(_ts(), 'ERROR', 'Unknown User — System Locked')
+                        last_face_authorized = face_authorized
+                else:
+                    state.set_face_auth(True, face_status)
+                    last_face_authorized = None
+
+                # ----------------------------------------------------------
                 # Activation manager
                 # ----------------------------------------------------------
-                should_execute = activation_manager.update(gesture)
+                if decision_engine.current_mode == 'System Mode' and not face_authorized:
+                    activation_manager.force_inactive('Unknown user in System Mode')
+                    should_execute = False
+                else:
+                    should_execute = activation_manager.update(gesture)
                 state.set_system_active(activation_manager.is_active)
                 state.set_cooldown(activation_manager.is_in_cooldown)
 
@@ -409,7 +493,11 @@ class WorkerThread(QThread):
                     state.emit_log(_ts(), 'ACTION', f'{label}  [Custom Gesture]')
                     state.set_action_executed(custom_action)
                     log_action_executed(label)
-                elif decision_engine.current_mode == 'System Mode' and activation_manager.is_active:
+                elif (
+                    decision_engine.current_mode == 'System Mode'
+                    and activation_manager.is_active
+                    and face_authorized
+                ):
                     if hand_data:
                         am_label = air_mouse.update(
                             landmarks     = hand_data['landmarks'],
@@ -448,6 +536,8 @@ class WorkerThread(QThread):
                     decision_engine.current_mode,
                     activation_manager.is_active,
                     fps_counter.fps,
+                    face_status=face_status if decision_engine.current_mode == 'System Mode' else None,
+                    face_authorized=face_authorized if decision_engine.current_mode == 'System Mode' else None,
                 )
 
                 self.frame_ready.emit(_frame_to_qimage(frame))
@@ -455,6 +545,8 @@ class WorkerThread(QThread):
             # ---- Loop exited cleanly ---
             camera.release()
             hand_tracker.close()
+            if face_security is not None:
+                face_security.close()
             state.set_system_active(False)
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline stopped')
             log_pipeline_state('Pipeline stopped')
@@ -470,5 +562,10 @@ class WorkerThread(QThread):
             try:
                 if camera is not None:
                     camera.release()
+            except Exception:
+                pass
+            try:
+                if face_security is not None:
+                    face_security.close()
             except Exception:
                 pass

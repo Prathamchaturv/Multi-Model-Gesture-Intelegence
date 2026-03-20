@@ -516,11 +516,24 @@ class VisionPanel(QWidget):
             f'color: {ACTIVE}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
         )
 
+        sep2 = QLabel('|')
+        sep2.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
+
+        auth_title = QLabel('FACE AUTH')
+        auth_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
+        self._face_auth_val = QLabel('Face Auth: Idle')
+        self._face_auth_val.setStyleSheet(
+            f'color: {TEXT_SEC}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+        )
+
         fb_lay.addWidget(gest_title)
         fb_lay.addWidget(self._gesture_detected_val)
         fb_lay.addWidget(sep)
         fb_lay.addWidget(action_title)
         fb_lay.addWidget(self._action_executed_val)
+        fb_lay.addWidget(sep2)
+        fb_lay.addWidget(auth_title)
+        fb_lay.addWidget(self._face_auth_val)
         fb_lay.addStretch()
         root.addWidget(feedback_frame)
 
@@ -567,6 +580,7 @@ class VisionPanel(QWidget):
         s.mode_stability_changed.connect(self._on_stability_changed)
         s.system_active_changed.connect(self._on_active_changed)
         s.action_executed.connect(self._on_action_executed)
+        s.face_auth_changed.connect(self._on_face_auth_changed)
 
     @pyqtSlot(QImage)
     def update_frame(self, image: QImage) -> None:
@@ -621,6 +635,14 @@ class VisionPanel(QWidget):
     def _on_action_executed(self, action: str) -> None:
         label = _ACTION_DISPLAY_LABELS.get(action, action)
         self._action_executed_val.setText(label if label else '—')
+
+    @pyqtSlot(bool, str)
+    def _on_face_auth_changed(self, authorized: bool, status_text: str) -> None:
+        self._face_auth_val.setText(status_text if status_text else 'Face Auth: Idle')
+        colour = ACTIVE if authorized else INACTIVE
+        self._face_auth_val.setStyleSheet(
+            f'color: {colour}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+        )
 
     @pyqtSlot(float)
     def _on_stability_changed(self, progress: float) -> None:
@@ -710,6 +732,7 @@ class SystemCard(QFrame):
         self._state = state
         self._build()
         state.system_active_changed.connect(self._on_active)
+        state.face_auth_changed.connect(self._on_face_auth)
 
     def _build(self) -> None:
         self.setObjectName('card')
@@ -754,6 +777,14 @@ class SystemCard(QFrame):
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(hint)
 
+        self._auth_lbl = QLabel('Face Auth: Idle (System Mode Only)')
+        self._auth_lbl.setWordWrap(True)
+        self._auth_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._auth_lbl.setStyleSheet(
+            f'color: {TEXT_HINT}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+        )
+        lay.addWidget(self._auth_lbl)
+
     @pyqtSlot(bool)
     def _on_active(self, active: bool) -> None:
         if active:
@@ -771,6 +802,14 @@ class SystemCard(QFrame):
 
     def _on_toggle_clicked(self) -> None:
         pass  # Visual feedback only
+
+    @pyqtSlot(bool, str)
+    def _on_face_auth(self, authorized: bool, status_text: str) -> None:
+        colour = ACTIVE if authorized else INACTIVE
+        self._auth_lbl.setText(status_text if status_text else 'Face Auth: Idle (System Mode Only)')
+        self._auth_lbl.setStyleSheet(
+            f'color: {colour}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+        )
 
     @staticmethod
     def _btn_style(active: bool) -> str:

@@ -52,6 +52,7 @@ class SharedState(QObject):
     volume_changed          = pyqtSignal(int)
     mode_stability_changed  = pyqtSignal(float)
     landmarks_changed       = pyqtSignal(object)
+    face_auth_changed       = pyqtSignal(bool, str)
 
     # Batched update – emits a snapshot dict for panels that want everything
     snapshot_ready          = pyqtSignal(dict)
@@ -76,6 +77,8 @@ class SharedState(QObject):
         self._mode_stability   = 0.0
         self._last_action      = ''
         self._latest_landmarks = None
+        self._face_authorized  = True
+        self._face_status      = 'Face Auth: Idle'
 
     # ------------------------------------------------------------------ getters
     @property
@@ -96,6 +99,10 @@ class SharedState(QObject):
     def volume_level(self)    -> int:   return self._volume_level
     @property
     def mode_stability(self)  -> float: return self._mode_stability
+    @property
+    def face_authorized(self) -> bool:  return self._face_authorized
+    @property
+    def face_status(self)     -> str:   return self._face_status
 
     # ------------------------------------------------------------------ setters
     def set_system_active(self, value: bool) -> None:
@@ -152,6 +159,17 @@ class SharedState(QObject):
         self._latest_landmarks = landmarks
         self.landmarks_changed.emit(landmarks)
 
+    def set_face_auth(self, authorized: bool, status_text: str) -> None:
+        """Broadcast current face authorization state."""
+        changed = (
+            self._face_authorized != bool(authorized)
+            or self._face_status != str(status_text)
+        )
+        self._face_authorized = bool(authorized)
+        self._face_status = str(status_text)
+        if changed:
+            self.face_auth_changed.emit(self._face_authorized, self._face_status)
+
     def emit_log(self, timestamp: str, category: str, description: str) -> None:
         """Convenience wrapper to push an activity log event."""
         self.log_event.emit(timestamp, category, description)
@@ -169,6 +187,8 @@ class SharedState(QObject):
             'in_cooldown':    self._in_cooldown,
             'volume_level':   self._volume_level,
             'mode_stability': self._mode_stability,
+            'face_authorized': self._face_authorized,
+            'face_status': self._face_status,
         }
 
     def _emit_snapshot(self) -> None:

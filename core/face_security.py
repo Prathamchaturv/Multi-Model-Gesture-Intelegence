@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
 import numpy as np
 
 
@@ -54,10 +53,10 @@ class FaceSecurityManager:
         if not self._authorized_encoding_path.is_absolute():
             self._authorized_encoding_path = root / self._authorized_encoding_path
 
-        self._detector = mp.solutions.face_detection.FaceDetection(
-            model_selection=0,
-            min_detection_confidence=float(min_detection_confidence),
-        )
+        # OpenCV Haar detector keeps runtime dependency lightweight and stable.
+        self._face_detector_conf = float(min_detection_confidence)
+        cascade_path = Path(cv2.data.haarcascades) / 'haarcascade_frontalface_default.xml'
+        self._face_cascade = cv2.CascadeClassifier(str(cascade_path))
 
         self._reference_encoding: np.ndarray | None = self._load_or_build_reference()
 
@@ -103,10 +102,7 @@ class FaceSecurityManager:
 
     def close(self) -> None:
         """Release detector resources."""
-        try:
-            self._detector.close()
-        except Exception:
-            pass
+        return None
 
     def _load_or_build_reference(self) -> np.ndarray | None:
         from_file = self._load_reference_from_file()
@@ -157,24 +153,24 @@ class FaceSecurityManager:
             pass
 
     def _detect_face_bbox(self, frame_bgr) -> tuple[int, int, int, int] | None:
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        result = self._detector.process(rgb)
-        detections = result.detections if result is not None else None
-        if not detections:
+        if self._face_cascade.empty():
             return None
 
-        h, w = frame_bgr.shape[:2]
-        best = max(
-            detections,
-            key=lambda d: float(d.score[0]) if d.score else 0.0,
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        faces = self._face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.15,
+            minNeighbors=5,
+            minSize=(40, 40),
         )
-        rel = best.location_data.relative_bounding_box
-        x1 = max(0, int(rel.xmin * w))
-        y1 = max(0, int(rel.ymin * h))
-        x2 = min(w, int((rel.xmin + rel.width) * w))
-        y2 = min(h, int((rel.ymin + rel.height) * h))
-        if x2 <= x1 or y2 <= y1:
+        if len(faces) == 0:
             return None
+
+        x, y, w, h = max(faces, key=lambda rect: rect[2] * rect[3])
+        x1 = max(0, int(x))
+        y1 = max(0, int(y))
+        x2 = int(x + w)
+        y2 = int(y + h)
         return x1, y1, x2, y2
 
     def _encode_face(self, frame_bgr, bbox: tuple[int, int, int, int]) -> np.ndarray | None:

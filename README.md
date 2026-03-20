@@ -156,6 +156,12 @@ gesture is interpreted.
 - **Rising-edge detection** on all click gestures — fires once per onset, not on hold,
   with a 0.5 s inter-click cooldown
 - Implemented via Win32 `ctypes` (`mouse_event`, `SetCursorPos`) — no external mouse library
+- **Face-Based Security gate (System Mode only)**:
+  - Face is detected in real time from webcam feed
+  - Current face is compared with a stored authorized user face encoding
+  - Match -> `User Recognized` and System Mode remains available
+  - Unknown / no-face -> `Unknown User` and System Mode is locked
+  - Unauthorized face status overrides gesture activation in System Mode
 
 ### 3.6 Activation and Safety System
 
@@ -307,6 +313,7 @@ MMGI/
 │
 ├── config/
 │   └── gesture_map.json           # Mode → gesture → action mapping (user-editable)
+│   └── face_security.json         # System Mode face-auth gate configuration
 │
 ├── core/                          # Perception layer — no Qt, no pyautogui imports
 │   ├── camera.py                  # cv2.VideoCapture wrapper
@@ -424,6 +431,15 @@ python main.py
 # Headless mode — OpenCV window only, no Qt
 python main.py --headless
 ```
+
+### Face Security Setup (System Mode)
+
+1. Place an authorized face image at `config/authorized_face.jpg`.
+2. Tune thresholds in `config/face_security.json` if needed.
+3. Run `python main.py` and switch to `System Mode`.
+4. Confirm dashboard feedback shows either `User Recognized` or `Unknown User`.
+
+If no authorized face reference is available, System Mode remains locked by design.
 
 ### Quick Usage Checklist
 

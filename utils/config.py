@@ -53,6 +53,14 @@ class Config:
             'confirm_frames': 4,
             'store_path': 'config/custom_gestures.json',
         },
+        'face_security': {
+            'enabled': True,
+            'authorized_image_path': 'config/authorized_face.jpg',
+            'authorized_encoding_path': 'config/authorized_face_encoding.json',
+            'similarity_threshold': 0.84,
+            'min_detection_confidence': 0.6,
+            'eval_interval_s': 0.08,
+        },
     }
 
     def __init__(self, config_path: str | None = None):

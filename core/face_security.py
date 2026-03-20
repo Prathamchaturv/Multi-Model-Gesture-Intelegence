@@ -79,6 +79,20 @@ class FaceSecurityManager:
             similarity=None,
         )
 
+    @property
+    def has_reference(self) -> bool:
+        """Whether an authorized face reference encoding is available."""
+        return self._reference_encoding is not None
+
+    @property
+    def setup_status_text(self) -> str:
+        """Human-readable setup status for dashboard display."""
+        if not self._enabled:
+            return 'Face Security Disabled'
+        if self.has_reference:
+            return 'Face Security Ready (System Mode Only)'
+        return 'Face Security Setup Required: add config/authorized_face.jpg'
+
     def evaluate(self, frame_bgr) -> FaceAuthResult:
         """Evaluate face authorization for the current camera frame."""
         if not self._enabled:

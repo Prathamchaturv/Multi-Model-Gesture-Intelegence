@@ -76,6 +76,15 @@ class ActivationManager:
             if reason:
                 print(f'! System locked: {reason}')
 
+    def force_active(self, reason: str | None = None) -> None:
+        """Force the gate into ACTIVE state immediately."""
+        if self._state != self.STATE_ACTIVE:
+            self._state = self.STATE_ACTIVE
+            self._activation_start = None
+            self._last_action_time = time.time()
+            if reason:
+                print(f'✓ System resumed: {reason}')
+
     # ------------------------------------------------------------------
     # Main update — called once per frame
     # ------------------------------------------------------------------

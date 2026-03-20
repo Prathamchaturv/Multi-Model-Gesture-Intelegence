@@ -40,7 +40,7 @@ class TestFaceSecurityManager(unittest.TestCase):
         frame = np.zeros((120, 160, 3), dtype=np.uint8)
         result = mgr.evaluate(frame)
         self.assertTrue(result.is_authorized)
-        self.assertIn('User Recognized', result.status_text)
+        self.assertIn('User Detected', result.status_text)
 
     def test_missing_reference_is_unauthorized(self):
         mgr, _ = self._make_manager(enabled=True)
@@ -72,7 +72,7 @@ class TestFaceSecurityManager(unittest.TestCase):
 
         result = mgr.evaluate(frame)
         self.assertTrue(result.is_authorized)
-        self.assertIn('User Recognized', result.status_text)
+        self.assertIn('User Detected', result.status_text)
 
     def test_unknown_when_similarity_below_threshold(self):
         mgr, encoding_path = self._make_manager(enabled=True, threshold=0.95)
@@ -88,6 +88,53 @@ class TestFaceSecurityManager(unittest.TestCase):
         self.assertFalse(result.is_authorized)
         self.assertEqual(result.status_text, 'Unknown User X')
 
+    def test_marks_user_away_after_delay(self):
+        mgr, encoding_path = self._make_manager(enabled=True, threshold=0.8)
+        with open(encoding_path, 'w', encoding='utf-8') as fh:
+            json.dump({'encoding': [1.0, 0.0]}, fh)
+        mgr._reference_encoding = mgr._load_reference_from_file()
+        mgr._away_delay_s = 2.0
+
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        mgr._detect_face_bbox = MagicMock(return_value=None)
+
+        with unittest.mock.patch('core.face_security.time.time', side_effect=[10.0, 12.2]):
+            first = mgr.evaluate(frame)
+            second = mgr.evaluate(frame)
+
+        self.assertFalse(first.system_paused)
+        self.assertTrue(second.system_paused)
+        self.assertEqual(second.status_text, 'User Away - System Paused')
+
+    def test_user_returns_after_confirm_window(self):
+        mgr, encoding_path = self._make_manager(enabled=True, threshold=0.7)
+        with open(encoding_path, 'w', encoding='utf-8') as fh:
+            json.dump({'encoding': [1.0, 0.0]}, fh)
+        mgr._reference_encoding = mgr._load_reference_from_file()
+        mgr._away_delay_s = 0.5
+        mgr._return_confirm_s = 0.6
+
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        mgr._encode_face = MagicMock(return_value=np.array([1.0, 0.0], dtype=np.float32))
+
+        # Become away first.
+        mgr._detect_face_bbox = MagicMock(return_value=None)
+        with unittest.mock.patch('core.face_security.time.time', side_effect=[10.0, 10.8]):
+            mgr.evaluate(frame)
+            away_result = mgr.evaluate(frame)
+        self.assertTrue(away_result.system_paused)
+
+        # Face reappears and is confirmed after return_confirm_s.
+        mgr._detect_face_bbox = MagicMock(return_value=(0, 0, 64, 64))
+        with unittest.mock.patch('core.face_security.time.time', side_effect=[11.0, 11.8]):
+            first_return = mgr.evaluate(frame)
+            confirmed_return = mgr.evaluate(frame)
+
+        self.assertTrue(first_return.system_paused)
+        self.assertFalse(confirmed_return.system_paused)
+        self.assertTrue(confirmed_return.is_authorized)
+        self.assertEqual(confirmed_return.status_text, 'User Detected - System Active')
+
 
 class TestActivationManagerLock(unittest.TestCase):
     def test_force_inactive_locks_active_state(self):
@@ -95,6 +142,12 @@ class TestActivationManagerLock(unittest.TestCase):
         manager._state = manager.STATE_ACTIVE
         manager.force_inactive('test lock')
         self.assertEqual(manager.state, manager.STATE_INACTIVE)
+
+    def test_force_active_restores_state(self):
+        manager = ActivationManager()
+        manager._state = manager.STATE_INACTIVE
+        manager.force_active('user returned')
+        self.assertEqual(manager.state, manager.STATE_ACTIVE)
 
 
 if __name__ == '__main__':

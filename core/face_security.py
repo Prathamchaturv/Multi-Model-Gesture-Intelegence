@@ -25,6 +25,8 @@ class FaceAuthResult:
     is_authorized: bool
     status_text: str
     face_detected: bool
+    user_present: bool
+    system_paused: bool
     similarity: float | None = None
 
 
@@ -39,10 +41,14 @@ class FaceSecurityManager:
         similarity_threshold: float = 0.84,
         min_detection_confidence: float = 0.6,
         eval_interval_s: float = 0.08,
+        away_delay_s: float = 2.5,
+        return_confirm_s: float = 0.7,
     ) -> None:
         self._enabled = bool(enabled)
         self._similarity_threshold = float(similarity_threshold)
         self._eval_interval_s = max(0.0, float(eval_interval_s))
+        self._away_delay_s = max(0.5, float(away_delay_s))
+        self._return_confirm_s = max(0.1, float(return_confirm_s))
 
         root = Path(__file__).parent.parent
         self._authorized_image_path = Path(authorized_image_path)
@@ -59,19 +65,31 @@ class FaceSecurityManager:
         self._face_cascade = cv2.CascadeClassifier(str(cascade_path))
 
         self._reference_encoding: np.ndarray | None = self._load_or_build_reference()
+        self._last_face_seen_ts: float | None = None
+        self._first_return_face_ts: float | None = None
+        self._is_present_confirmed: bool = True
 
         self._last_eval_ts: float = 0.0
         self._last_result = FaceAuthResult(
             is_authorized=not self._enabled,
             status_text='Face security disabled' if not self._enabled else 'No face detected',
             face_detected=False,
+            user_present=True,
+            system_paused=False,
             similarity=None,
         )
 
     def evaluate(self, frame_bgr) -> FaceAuthResult:
         """Evaluate face authorization for the current camera frame."""
         if not self._enabled:
-            self._last_result = FaceAuthResult(True, 'User Recognized [Face Security Disabled]', False, None)
+            self._last_result = FaceAuthResult(
+                True,
+                'User Detected - System Active [Face Security Disabled]',
+                False,
+                True,
+                False,
+                None,
+            )
             return self._last_result
 
         now = time.time()
@@ -80,25 +98,96 @@ class FaceSecurityManager:
         self._last_eval_ts = now
 
         if self._reference_encoding is None:
-            self._last_result = FaceAuthResult(False, 'Unknown User X (No Authorized Face Registered)', False, None)
+            self._last_result = FaceAuthResult(
+                False,
+                'Unknown User X (No Authorized Face Registered)',
+                False,
+                self._is_present_confirmed,
+                not self._is_present_confirmed,
+                None,
+            )
             return self._last_result
 
         face_bbox = self._detect_face_bbox(frame_bgr)
+        self._update_presence(face_bbox is not None, now)
+
+        if not self._is_present_confirmed:
+            self._last_result = FaceAuthResult(
+                False,
+                'User Away - System Paused',
+                face_bbox is not None,
+                False,
+                True,
+                None,
+            )
+            return self._last_result
+
         if face_bbox is None:
-            self._last_result = FaceAuthResult(False, 'Unknown User X (No Face Detected)', False, None)
+            self._last_result = FaceAuthResult(
+                False,
+                'Unknown User X (No Face Detected)',
+                False,
+                True,
+                False,
+                None,
+            )
             return self._last_result
 
         encoding = self._encode_face(frame_bgr, face_bbox)
         if encoding is None:
-            self._last_result = FaceAuthResult(False, 'Unknown User X (Face Encoding Failed)', True, None)
+            self._last_result = FaceAuthResult(
+                False,
+                'Unknown User X (Face Encoding Failed)',
+                True,
+                True,
+                False,
+                None,
+            )
             return self._last_result
 
         similarity = self._cosine_similarity(encoding, self._reference_encoding)
         if similarity >= self._similarity_threshold:
-            self._last_result = FaceAuthResult(True, 'User Recognized OK', True, similarity)
+            self._last_result = FaceAuthResult(
+                True,
+                'User Detected - System Active',
+                True,
+                True,
+                False,
+                similarity,
+            )
         else:
-            self._last_result = FaceAuthResult(False, 'Unknown User X', True, similarity)
+            self._last_result = FaceAuthResult(
+                False,
+                'Unknown User X',
+                True,
+                True,
+                False,
+                similarity,
+            )
         return self._last_result
+
+    def _update_presence(self, face_visible: bool, now: float) -> None:
+        if face_visible:
+            self._last_face_seen_ts = now
+            if self._is_present_confirmed:
+                self._first_return_face_ts = None
+                return
+
+            if self._first_return_face_ts is None:
+                self._first_return_face_ts = now
+                return
+
+            if (now - self._first_return_face_ts) >= self._return_confirm_s:
+                self._is_present_confirmed = True
+                self._first_return_face_ts = None
+            return
+
+        self._first_return_face_ts = None
+        if self._last_face_seen_ts is None:
+            self._last_face_seen_ts = now
+
+        if (now - self._last_face_seen_ts) >= self._away_delay_s:
+            self._is_present_confirmed = False
 
     def close(self) -> None:
         """Release detector resources."""

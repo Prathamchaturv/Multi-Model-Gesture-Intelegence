@@ -1,23 +1,23 @@
 """
 Module: system_mode_engine.py
 Description: System Mode air-mouse engine — translates hand landmarks into
-             Win32 mouse events (cursor move, left/right click, scroll,
-             double-click) using EMA smoothing and rising-edge detection.
+             Win32 mouse events with index-tip cursor movement and pinch click,
+             using EMA smoothing and rising-edge detection.
 Author: Pratham Chaturvedi
 
 core/system_mode_engine.py - System Mode Air Mouse Engine
 
 Provides full air-mouse control when 'System Mode' is active:
 
-  Gesture          →  Mouse action
-  ─────────────────────────────────────────────────────────
-  One Finger       →  Move cursor  (index fingertip tracks screen)
-  Two Fingers      →  Scroll       (vertical finger movement = scroll wheel)
-  Pinky            →  Left click
-  Ring and Pinky   →  Right click
-  Thumbs Up        →  Double-click
-  Three Fingers    →  Mode switch  (handled by DecisionEngine upstream)
-  Open Palm / Fist →  Activate / Deactivate  (ActivationManager upstream)
+    Gesture / pose      →  Mouse action
+    ─────────────────────────────────────────────────────────
+    Index fingertip     →  Move cursor  (continuous)
+    Thumb+index pinch   →  Left click   (rising edge)
+    Two Fingers         →  Scroll       (optional, backward compatible)
+    Ring and Pinky      →  Right click  (optional, backward compatible)
+    Thumbs Up           →  Double-click (optional, backward compatible)
+    Three Fingers       →  Mode switch  (handled by DecisionEngine upstream)
+    Open Palm / Fist    →  Activate / Deactivate  (ActivationManager upstream)
 
 Uses ctypes.windll.user32 for all Win32 input — no extra dependencies.
 Applies Exponential Moving Average (EMA) smoothing to eliminate hand jitter.
@@ -72,8 +72,10 @@ class AirMouseController:
         change.  Default 600  (positive = scroll up).
     """
 
-    # Landmark index used for cursor tracking (index-fingertip)
-    _CURSOR_LM = 8
+    # Landmark indexes (MediaPipe Hands)
+    _CURSOR_LM = 8   # index tip
+    _THUMB_LM  = 4   # thumb tip
+    _INDEX_LM  = 8   # index tip
 
     def __init__(
         self,
@@ -82,6 +84,8 @@ class AirMouseController:
         input_margin:       float = 0.12,
         click_cooldown:     float = 0.5,
         scroll_sensitivity: int   = 600,
+        pinch_threshold:    float = 0.045,
+        pinch_release:      float = 0.065,
     ) -> None:
         _u32 = ctypes.windll.user32
         self._screen_w: int = _u32.GetSystemMetrics(0)
@@ -92,6 +96,8 @@ class AirMouseController:
         self._margin             = input_margin
         self._click_cooldown     = click_cooldown
         self._scroll_sensitivity = scroll_sensitivity
+        self._pinch_threshold = max(0.01, float(pinch_threshold))
+        self._pinch_release_threshold = max(self._pinch_threshold + 0.005, float(pinch_release))
 
         # Smoothed cursor state
         self._smooth_x: float | None = None
@@ -105,6 +111,7 @@ class AirMouseController:
 
         # Previous gesture (for edge-detection on click gestures)
         self._prev_gesture: str | None = None
+        self._pinch_active = False
 
         print(
             f'[AirMouseController] Screen {self._screen_w}x{self._screen_h}  '
@@ -142,23 +149,33 @@ class AirMouseController:
             self._smooth_x     = None
             self._smooth_y     = None
             self._scroll_ref_y = None
+            self._pinch_active = False
             self._prev_gesture = gesture
             return None
 
         action_taken: str | None = None
 
-        # ── Continuous move (One Finger) ─────────────────────────────────
+        # Cursor movement is always driven by index tip in System Mode.
+        self._move_cursor(landmarks)
+
+        # Pinch click (thumb + index) with hysteresis and rising-edge trigger.
+        pinch_enabled = bool(finger_states and finger_states.get('thumb') and finger_states.get('index'))
+        pinch_now = self._update_pinch_state(landmarks) if pinch_enabled else False
+        if pinch_now and not self._pinch_active:
+            action_taken = self._left_click()
+        self._pinch_active = pinch_now
+
+        # Optional legacy gesture actions remain available.
+        if action_taken is not None:
+            self._prev_gesture = gesture
+            return action_taken
+
         if gesture == 'One Finger':
             self._scroll_ref_y = None
-            action_taken = self._move_cursor(landmarks)
 
         # ── Scroll (Two Fingers — vertical delta drives wheel) ───────────
         elif gesture == 'Two Fingers':
             action_taken = self._scroll(landmarks)
-
-        # ── Left click (Pinky — rising edge only) ────────────────────────
-        elif gesture == 'Pinky' and self._prev_gesture != 'Pinky':
-            action_taken = self._left_click()
 
         # ── Right click (Ring and Pinky — rising edge) ───────────────────
         elif gesture == 'Ring and Pinky' and self._prev_gesture != 'Ring and Pinky':
@@ -180,6 +197,7 @@ class AirMouseController:
         self._smooth_y     = None
         self._scroll_ref_y = None
         self._prev_gesture = None
+        self._pinch_active = False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -230,6 +248,26 @@ class AirMouseController:
         ctypes.windll.user32.mouse_event(_MOUSEEVENTF_WHEEL, 0, 0, wheel_units, 0)
         self._scroll_ref_y = cur_y              # shift anchor → relative scroll
         return 'Scroll Up' if wheel_units > 0 else 'Scroll Down'
+
+    def _update_pinch_state(self, landmarks: list) -> bool:
+        """Return True when thumb and index fingertips are pinched."""
+        if len(landmarks) <= max(self._THUMB_LM, self._INDEX_LM):
+            return False
+
+        thumb = landmarks[self._THUMB_LM]
+        index = landmarks[self._INDEX_LM]
+        dist = self._distance_3d(thumb, index)
+
+        if self._pinch_active:
+            return dist <= self._pinch_release_threshold
+        return dist <= self._pinch_threshold
+
+    @staticmethod
+    def _distance_3d(a, b) -> float:
+        dx = float(a[0]) - float(b[0])
+        dy = float(a[1]) - float(b[1])
+        dz = float(a[2]) - float(b[2])
+        return (dx * dx + dy * dy + dz * dz) ** 0.5
 
     def _left_click(self) -> str | None:
         if not self._cooldown_ok():

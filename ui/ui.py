@@ -110,6 +110,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QProgressBar, QScrollArea,
     QSizePolicy, QSpacerItem, QMainWindow, QMessageBox,
     QComboBox, QStackedWidget, QLineEdit, QListWidget, QListWidgetItem,
+    QCheckBox,
 )
 
 from ui.shared_state  import SharedState
@@ -126,6 +127,7 @@ from core.adaptive_gesture_learning import (
 # ---------------------------------------------------------------------------
 
 _GESTURE_MAP_PATH = Path(__file__).parent.parent / 'config' / 'gesture_map.json'
+_FACE_SECURITY_PATH = Path(__file__).parent.parent / 'config' / 'face_security.json'
 
 # Human-readable labels for action keys (mirrors ActionExecutor._LABELS)
 _ACTION_DISPLAY_LABELS: dict[str, str] = {
@@ -157,6 +159,33 @@ def _load_gesture_map() -> dict:
             return json.load(fh)
     except Exception:
         return {}
+
+
+def _load_face_security_config() -> dict:
+    defaults = {
+        'enabled': True,
+        'authorized_image_path': 'config/authorized_face.jpg',
+        'authorized_encoding_path': 'config/authorized_face_encoding.json',
+        'similarity_threshold': 0.84,
+        'min_detection_confidence': 0.6,
+        'eval_interval_s': 0.08,
+        'away_delay_s': 2.5,
+        'return_confirm_s': 0.7,
+    }
+    try:
+        with open(_FACE_SECURITY_PATH, 'r', encoding='utf-8') as fh:
+            raw = json.load(fh)
+        if isinstance(raw, dict):
+            defaults.update(raw)
+    except Exception:
+        pass
+    return defaults
+
+
+def _save_face_security_config(data: dict) -> None:
+    _FACE_SECURITY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_FACE_SECURITY_PATH, 'w', encoding='utf-8') as fh:
+        json.dump(data, fh, indent=2)
 
 
 # ===========================================================================
@@ -288,6 +317,7 @@ _TABS = [
     ('mode',     '⊞', 'Mode'),
     ('gestures', '✋', 'Gestures'),
     ('help',     '?', 'Guide'),
+    ('settings', '⚙', 'Settings'),
 ]
 
 
@@ -1887,6 +1917,150 @@ class HelpGuidePanel(QWidget):
         self._load_mapping_reference()
 
 
+class SettingsPanel(QWidget):
+    """Settings tab with security controls for face-based authentication."""
+
+    def __init__(self, state: SharedState, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._state = state
+        self._worker: WorkerThread | None = None
+        self._cfg = _load_face_security_config()
+        self._build_ui()
+        self._sync_ui_from_config()
+
+    def set_worker(self, worker: WorkerThread) -> None:
+        self._worker = worker
+
+    def _build_ui(self) -> None:
+        self.setStyleSheet(f'background-color: {BG_DEEP};')
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 18, 24, 18)
+        root.setSpacing(10)
+
+        title = QLabel('SETTINGS')
+        title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 16px; font-weight: 700; letter-spacing: 2px;'
+        )
+        root.addWidget(title)
+
+        card = QFrame()
+        card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(16, 14, 16, 16)
+        lay.setSpacing(10)
+
+        sec_title = QLabel('SECURITY')
+        sec_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        lay.addWidget(sec_title)
+        lay.addWidget(_divider())
+
+        self._face_toggle = QCheckBox('Enable Face Security')
+        self._face_toggle.setStyleSheet(f"""
+            QCheckBox {{ color: {TEXT_PRI}; font-size: 13px; font-weight: 600; background: transparent; }}
+            QCheckBox::indicator {{ width: 16px; height: 16px; }}
+            QCheckBox::indicator:unchecked {{ border: 1px solid {BORDER}; background: {BG_HOVER}; border-radius: 3px; }}
+            QCheckBox::indicator:checked {{ border: 1px solid {ACTIVE}; background: {ACTIVE}; border-radius: 3px; }}
+        """)
+        self._face_toggle.stateChanged.connect(self._on_toggle_face_security)
+        lay.addWidget(self._face_toggle)
+
+        self._capture_btn = QPushButton('Activate + Capture Authorized Face')
+        self._capture_btn.setFixedHeight(36)
+        self._capture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._capture_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0,229,255,0.12); color: {ACCENT}; border: 1px solid {ACCENT};
+                border-radius: 8px; font-size: 12px; font-weight: 700;
+            }}
+            QPushButton:hover {{ background: rgba(0,229,255,0.24); }}
+        """)
+        self._capture_btn.clicked.connect(self._on_capture_face)
+        lay.addWidget(self._capture_btn)
+
+        hint = QLabel(
+            'This captures your face from the live camera and enables face security.\n'
+            'Restart MMGI after capture to apply the new authorized face encoding.'
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px; background: transparent; border: none;')
+        lay.addWidget(hint)
+
+        self._status_lbl = QLabel('')
+        self._status_lbl.setWordWrap(True)
+        self._status_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
+        lay.addWidget(self._status_lbl)
+
+        root.addWidget(card)
+        root.addStretch()
+
+    def _sync_ui_from_config(self) -> None:
+        self._cfg = _load_face_security_config()
+        self._face_toggle.blockSignals(True)
+        self._face_toggle.setChecked(bool(self._cfg.get('enabled', True)))
+        self._face_toggle.blockSignals(False)
+
+    def _on_toggle_face_security(self, _state: int) -> None:
+        self._cfg['enabled'] = self._face_toggle.isChecked()
+        try:
+            _save_face_security_config(self._cfg)
+            if self._cfg['enabled']:
+                self._status_lbl.setText('Face security enabled. It will remain active until you disable it.')
+                self._status_lbl.setStyleSheet(
+                    f'color: {ACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+                )
+            else:
+                self._status_lbl.setText('Face security disabled.')
+                self._status_lbl.setStyleSheet(
+                    f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+                )
+        except Exception as exc:
+            self._status_lbl.setText(f'Failed to save setting: {exc}')
+            self._status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
+
+    def _on_capture_face(self) -> None:
+        self._cfg['enabled'] = True
+        self._face_toggle.blockSignals(True)
+        self._face_toggle.setChecked(True)
+        self._face_toggle.blockSignals(False)
+        try:
+            _save_face_security_config(self._cfg)
+        except Exception as exc:
+            self._status_lbl.setText(f'Failed to enable face security: {exc}')
+            self._status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
+            return
+
+        if self._worker is None or not self._worker.isRunning():
+            self._status_lbl.setText('Worker not running yet. Start camera stream and try again.')
+            self._status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
+            return
+
+        ok, message = self._worker.capture_authorized_face()
+        if ok:
+            self._status_lbl.setText(message)
+            self._status_lbl.setStyleSheet(
+                f'color: {ACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
+            QMessageBox.information(self, 'Face Captured', message)
+        else:
+            self._status_lbl.setText(message)
+            self._status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
+
+    def refresh(self) -> None:
+        self._sync_ui_from_config()
+
+
 class SystemPanel(QWidget):
     def __init__(self, state: SharedState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1989,11 +2163,15 @@ class MainWindow(QMainWindow):
         # Help / Guide tab view
         self._help_panel = HelpGuidePanel()
 
-        # Stack: index 0 = main view, index 1 = gesture mapping, index 2 = help
+        # Settings tab view
+        self._settings_panel = SettingsPanel(self._state)
+
+        # Stack: index 0 = main view, index 1 = gesture mapping, index 2 = help, index 3 = settings
         self._body_stack = QStackedWidget()
         self._body_stack.addWidget(main_view)
         self._body_stack.addWidget(self._gesture_map_panel)
         self._body_stack.addWidget(self._help_panel)
+        self._body_stack.addWidget(self._settings_panel)
 
         body.addWidget(self._sidebar)
         body.addWidget(self._body_stack, stretch=1)
@@ -2011,6 +2189,10 @@ class MainWindow(QMainWindow):
         elif tab_id == 'help':
             self._help_panel.refresh()
             self._body_stack.setCurrentIndex(2)
+            self._activity.setVisible(False)
+        elif tab_id == 'settings':
+            self._settings_panel.refresh()
+            self._body_stack.setCurrentIndex(3)
             self._activity.setVisible(False)
         else:
             self._body_stack.setCurrentIndex(0)
@@ -2065,6 +2247,7 @@ class MainWindow(QMainWindow):
         self._worker.frame_ready.connect(self._vision.update_frame)
         self._worker.error.connect(self._on_worker_error)
         self._worker.start()
+        self._settings_panel.set_worker(self._worker)
 
     @pyqtSlot(bool)
     def _on_active_header(self, active: bool) -> None:

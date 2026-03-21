@@ -1,11 +1,19 @@
 {
-    "_comment": "Smart Mode gesture-action mappings. Three Fingers cycles modes (App\u2192Media\u2192System\u2192App). System Mode gesture cursor control is disabled.",
+    "_comment": "Unified multimodal maps. Gesture and voice commands are normalized and resolved by the same DecisionEngine.",
     "mode_switch": {
         "Three Fingers": "next_mode"
     },
+    "voice_mode_switch": {
+        "next_mode": "next_mode",
+        "switch_to_app_mode": "App Mode",
+        "switch_to_media_mode": "Media Mode",
+        "switch_to_system_mode": "System Mode"
+    },
     "App Mode": {
         "One Finger": "open_brave",
-        "Two Fingers": "open_apple_music"
+        "Two Fingers": "open_apple_music",
+        "Thumbs Up": "open_youtube",
+        "Ring and Pinky": "close_window"
     },
     "Media Mode": {
         "One Finger": "volume_up",
@@ -13,9 +21,78 @@
         "Four Fingers": "play_pause",
         "Thumbs Up": "mute"
     },
-    "_system_mode_note": "System Mode gesture cursor control is disabled. Use System Mode voice commands.",
-    "_system_mode_gestures": {
-        "Voice Command": "Open Brave, Open YouTube, Close Window, Switch Tab, Scroll Down"
+    "System Mode": {
+        "Two Fingers": "left_click",
+        "Ring and Pinky": "right_click",
+        "Thumbs Up": "double_click"
     },
-    "System Mode": {}
+    "voice": {
+        "App Mode": {
+            "open_brave": "open_brave",
+            "open_apple_music": "open_apple_music",
+            "open_youtube": "open_youtube",
+            "close_window": "close_window",
+            "switch_tab": "switch_tab",
+            "scroll_down": "scroll_down"
+        },
+        "Media Mode": {
+            "play_song": "play_pause",
+            "pause": "play_pause",
+            "next_track": "next_track",
+            "previous_track": "prev_track",
+            "volume_up": "volume_up",
+            "volume_down": "volume_down",
+            "mute": "mute"
+        },
+        "System Mode": {
+            "open_brave": "open_brave",
+            "open_apple_music": "open_apple_music",
+            "open_youtube": "open_youtube",
+            "close_window": "close_window",
+            "switch_tab": "switch_tab",
+            "scroll_down": "scroll_down",
+            "play_song": "play_pause",
+            "pause": "play_pause",
+            "next_track": "next_track",
+            "previous_track": "prev_track",
+            "volume_up": "volume_up",
+            "volume_down": "volume_down",
+            "mute": "mute"
+        }
+    },
+    "action_whitelist": {
+        "App Mode": [
+            "open_brave",
+            "open_apple_music",
+            "open_youtube",
+            "close_window",
+            "switch_tab",
+            "scroll_down"
+        ],
+        "Media Mode": [
+            "play_pause",
+            "next_track",
+            "prev_track",
+            "volume_up",
+            "volume_down",
+            "mute"
+        ],
+        "System Mode": [
+            "open_brave",
+            "open_apple_music",
+            "open_youtube",
+            "close_window",
+            "switch_tab",
+            "scroll_down",
+            "play_pause",
+            "next_track",
+            "prev_track",
+            "volume_up",
+            "volume_down",
+            "mute",
+            "left_click",
+            "right_click",
+            "double_click"
+        ]
+    }
 }

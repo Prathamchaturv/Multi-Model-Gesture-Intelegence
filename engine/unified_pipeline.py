@@ -22,6 +22,7 @@ from engine.action_executor import ActionExecutor
 from engine.decision_engine import DecisionEngine
 from utils.logger import (
     log_action_executed,
+    log_decision_made,
     log_input_received,
     log_pipeline_state,
     log_security_check,
@@ -169,6 +170,12 @@ class UnifiedDecisionPipeline:
         log_input_received(event.type, event.command, event.confidence)
 
         decision = self._decision_engine.decide(event, self._mode_manager.current_mode)
+        log_decision_made(
+            self._mode_manager.current_mode,
+            event.command,
+            decision.action,
+            decision.reason,
+        )
         target_mode = decision.target_mode
         mode_changed = False
         if target_mode:

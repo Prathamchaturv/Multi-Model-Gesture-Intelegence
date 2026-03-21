@@ -378,10 +378,10 @@ class DecisionEngine:
         raw_whitelist = data.get('action_whitelist', {}) if isinstance(data.get('action_whitelist', {}), dict) else {}
         self._action_whitelist = {}
         for mode in MODES:
-            allowed = list(whitelist_defaults.get(mode, []))
-            for action in raw_whitelist.get(mode, []):
-                if action in ALLOWED_ACTIONS:
-                    allowed.append(action)
+            if isinstance(raw_whitelist.get(mode), list):
+                allowed = [action for action in raw_whitelist.get(mode, []) if action in ALLOWED_ACTIONS]
+            else:
+                allowed = list(whitelist_defaults.get(mode, []))
             self._action_whitelist[mode] = set(allowed)
 
 

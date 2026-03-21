@@ -55,6 +55,9 @@ class ActionExecutor:
         'volume_up':         'Volume Up',
         'volume_down':       'Volume Down',
         'mute':              'Mute',
+        'left_click':        'Left Click',
+        'right_click':       'Right Click',
+        'double_click':      'Double Click',
     }
 
     # pyautogui key names for media / volume actions
@@ -132,6 +135,15 @@ class ActionExecutor:
 
             elif action == 'scroll_down':
                 self._scroll(-420)
+
+            elif action == 'left_click':
+                self._click('left')
+
+            elif action == 'right_click':
+                self._click('right')
+
+            elif action == 'double_click':
+                self._double_click()
 
             elif action in self._KEY_MAP:
                 self._press(self._KEY_MAP[action])
@@ -216,6 +228,20 @@ class ActionExecutor:
             pyautogui.scroll(amount)
         else:
             print(f'  [ActionExecutor] pyautogui unavailable — cannot scroll {amount}')
+
+    def _click(self, button: str) -> None:
+        """Send a mouse click via pyautogui."""
+        if _PYAUTOGUI:
+            pyautogui.click(button=button)
+        else:
+            print(f'  [ActionExecutor] pyautogui unavailable — cannot click {button}')
+
+    def _double_click(self) -> None:
+        """Send a mouse double-click via pyautogui."""
+        if _PYAUTOGUI:
+            pyautogui.doubleClick()
+        else:
+            print('  [ActionExecutor] pyautogui unavailable — cannot double-click')
 
     @staticmethod
     def _open_url(url: str) -> None:

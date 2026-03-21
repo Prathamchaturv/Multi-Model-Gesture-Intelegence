@@ -47,22 +47,22 @@ _VERSION      = 'MMGI v0.3'
 # Both strings must be self-contained so child widgets remain styled while
 # the parent QDialog stylesheet is shadowed on the container widget.
 _PW_FOCUSED = (
-    'QFrame#pw_container { background:#131840; border:2px solid #00e5ff;'
+    'QFrame#pw_container { background:#172743; border:2px solid #22d3ee;'
     '  border-radius:9px; }'
-    'QLineEdit#pw_edit { background:transparent; border:none; color:#dde8ff;'
+    'QLineEdit#pw_edit { background:transparent; border:none; color:#e6eef9;'
     '  font-size:13px; padding:9px 4px 9px 12px; }'
-    'QPushButton#eye_btn { background:transparent; border:none; color:#445577;'
+    'QPushButton#eye_btn { background:transparent; border:none; color:#6b7b96;'
     '  font-size:14px; padding:0 8px; min-width:34px; max-width:34px; }'
-    'QPushButton#eye_btn:hover { color:#00e5ff; }'
+    'QPushButton#eye_btn:hover { color:#22d3ee; }'
 )
 _PW_NORMAL = (
-    'QFrame#pw_container { background:#111630; border:1px solid #1e2a45;'
+    'QFrame#pw_container { background:#111d33; border:1px solid #243350;'
     '  border-radius:9px; }'
-    'QLineEdit#pw_edit { background:transparent; border:none; color:#dde8ff;'
+    'QLineEdit#pw_edit { background:transparent; border:none; color:#e6eef9;'
     '  font-size:13px; padding:9px 4px 9px 12px; }'
-    'QPushButton#eye_btn { background:transparent; border:none; color:#445577;'
+    'QPushButton#eye_btn { background:transparent; border:none; color:#6b7b96;'
     '  font-size:14px; padding:0 8px; min-width:34px; max-width:34px; }'
-    'QPushButton#eye_btn:hover { color:#00e5ff; }'
+    'QPushButton#eye_btn:hover { color:#22d3ee; }'
 )
 
 
@@ -152,85 +152,85 @@ def _is_strong_face_match(
 # ---------------------------------------------------------------------------
 
 _QSS = """
-/* Dialog: dark blue-to-deep-purple gradient background */
+/* Dialog: refined deep-navy gradient */
 QDialog {
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:1,
-        stop:0  #07091c,
-        stop:0.5 #0b0d22,
-        stop:1  #130828
+        stop:0  #070f1f,
+        stop:0.55 #0b1426,
+        stop:1  #111a2f
     );
 }
 
 /* Glass-style login card */
 QFrame#card {
-    background: #0e1230;
-    border: 1px solid rgba(0, 229, 255, 55);
-    border-radius: 16px;
+    background: #101c31;
+    border: 1px solid rgba(34, 211, 238, 75);
+    border-radius: 18px;
 }
 
 /* Gesture logo */
 QLabel#logo {
-    color: #00e5ff;
+    color: #22d3ee;
     font-size: 36px;
 }
 
 /* Title */
 QLabel#title {
-    color: #00e5ff;
-    font-size: 24px;
-    font-weight: bold;
-    letter-spacing: 3px;
+    color: #22d3ee;
+    font-size: 25px;
+    font-weight: 800;
+    letter-spacing: 5px;
 }
 
 /* Subtitle lines */
 QLabel#sub1 {
-    color: #6677aa;
-    font-size: 9px;
+    color: #a5b4cc;
+    font-size: 10px;
     letter-spacing: 2px;
 }
 QLabel#sub2 {
-    color: #4d5c88;
-    font-size: 9px;
+    color: #6b7b96;
+    font-size: 10px;
     letter-spacing: 1px;
 }
 
 /* Divider */
 QFrame#divider {
-    background: rgba(0, 229, 255, 30);
+    background: rgba(34, 211, 238, 40);
     max-height: 1px;
     border: none;
 }
 
 /* Field labels */
 QLabel#field_lbl {
-    color: #99aacc;
+    color: #b7c5d9;
     font-size: 11px;
 }
 
 /* Input fields: rounded corners (9px), dark background, cyan glow on focus */
 QLineEdit {
-    background: #111630;
-    border: 1px solid #1e2a45;
+    background: #111d33;
+    border: 1px solid #243350;
     border-radius: 9px;
-    color: #dde8ff;
+    color: #e6eef9;
     font-size: 13px;
     padding: 9px 12px;
-    selection-background-color: #00e5ff;
-    selection-color: #07091c;
+    selection-background-color: #22d3ee;
+    selection-color: #090e1a;
 }
 QLineEdit:hover:!focus {
-    border: 1px solid #2c3f64;
+    border: 1px solid #35527d;
 }
 QLineEdit:focus {
-    border: 2px solid #00e5ff;
-    background: #131840;
+    border: 2px solid #22d3ee;
+    background: #172743;
 }
 
 /* Password container (normal state; focus handled via _PW_FOCUSED/_PW_NORMAL) */
 QFrame#pw_container {
-    background: #111630;
-    border: 1px solid #1e2a45;
+    background: #111d33;
+    border: 1px solid #243350;
     border-radius: 9px;
 }
 
@@ -239,7 +239,7 @@ QLineEdit#pw_edit {
     background: transparent;
     border: none;
     border-radius: 0;
-    color: #dde8ff;
+    color: #e6eef9;
     font-size: 13px;
     padding: 9px 4px 9px 12px;
 }
@@ -252,14 +252,14 @@ QLineEdit#pw_edit:focus {
 QPushButton#eye_btn {
     background: transparent;
     border: none;
-    color: #445577;
+    color: #6b7b96;
     font-size: 14px;
     padding: 0 8px;
     min-width: 34px;
     max-width: 34px;
 }
 QPushButton#eye_btn:hover {
-    color: #00e5ff;
+    color: #22d3ee;
 }
 
 /* Error / success message */
@@ -271,9 +271,9 @@ QLabel#msg_label {
 QPushButton#login_btn {
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:0,
-        stop:0 #00bfd4, stop:1 #00e5ff
+        stop:0 #22d3ee, stop:1 #60a5fa
     );
-    color: #07091c;
+    color: #061224;
     border: none;
     border-radius: 9px;
     font-size: 13px;
@@ -284,24 +284,24 @@ QPushButton#login_btn {
 QPushButton#login_btn:hover {
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:0,
-        stop:0 #33d0e8, stop:1 #55edff
+        stop:0 #3fddf6, stop:1 #7db8ff
     );
 }
 QPushButton#login_btn:pressed {
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:0,
-        stop:0 #009bb5, stop:1 #00bed4
+        stop:0 #1ea7bd, stop:1 #4d83cd
     );
 }
 QPushButton#login_btn:disabled {
-    background: #1a2440;
-    color: #3a4a68;
+    background: #1b2941;
+    color: #5f7392;
     letter-spacing: 0;
 }
 
 /* Version watermark */
 QLabel#version_lbl {
-    color: #283a5a;
+    color: #4a6082;
     font-size: 10px;
     letter-spacing: 1px;
 }
@@ -340,7 +340,7 @@ class LoginWindow(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle('MMGI — Login')
-        self.setFixedSize(440, 620)
+        self.setFixedSize(460, 640)
         self.setStyleSheet(_QSS)
         self.setWindowFlags(
             Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint
@@ -444,10 +444,7 @@ class LoginWindow(QDialog):
         for btn in (self._pw_mode_btn, self._face_mode_btn):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(34)
-            btn.setStyleSheet(
-                'QPushButton { background:#111630; color:#99aacc; border:1px solid #1e2a45; border-radius:8px; font-size:12px; font-weight:600; }'
-                'QPushButton:hover { border:1px solid #00e5ff; color:#00e5ff; }'
-            )
+            btn.setStyleSheet(self._auth_mode_btn_style(active=False))
         self._pw_mode_btn.clicked.connect(lambda: self._select_auth_mode('password'))
         self._face_mode_btn.clicked.connect(lambda: self._select_auth_mode('face'))
         mode_row.addWidget(self._pw_mode_btn)
@@ -491,12 +488,12 @@ class LoginWindow(QDialog):
         self._face_preview = QLabel('Camera preview not started')
         self._face_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._face_preview.setFixedHeight(220)
-        self._face_preview.setStyleSheet('background:#0b1028; border:1px solid #1e2a45; border-radius:10px; color:#6677aa;')
+        self._face_preview.setStyleSheet('background:#0d162b; border:1px solid #243350; border-radius:10px; color:#6b7b96;')
         face_lay.addWidget(self._face_preview)
 
         self._face_status_lbl = QLabel('Press "Login with Face" and look at camera.')
         self._face_status_lbl.setWordWrap(True)
-        self._face_status_lbl.setStyleSheet('color:#99aacc; font-size:11px;')
+        self._face_status_lbl.setStyleSheet('color:#a5b4cc; font-size:11px;')
         face_lay.addWidget(self._face_status_lbl)
 
         self._face_login_btn = QPushButton('Login with Face')
@@ -604,6 +601,19 @@ class LoginWindow(QDialog):
             self._pw_edit.setEchoMode(QLineEdit.EchoMode.Password)
             self._eye_btn.setText('◉')   # filled circle  = hidden
 
+    @staticmethod
+    def _auth_mode_btn_style(active: bool) -> str:
+        if active:
+            return (
+                'QPushButton { background:#22d3ee; color:#061224; border:1px solid #22d3ee; '
+                'border-radius:8px; font-size:12px; font-weight:700; }'
+            )
+        return (
+            'QPushButton { background:#111d33; color:#a5b4cc; border:1px solid #243350; '
+            'border-radius:8px; font-size:12px; font-weight:600; }'
+            'QPushButton:hover { border:1px solid #22d3ee; color:#22d3ee; }'
+        )
+
     def _select_auth_mode(self, mode: str) -> None:
         self._auth_mode = mode
         is_pw = mode == 'password'
@@ -611,26 +621,16 @@ class LoginWindow(QDialog):
         self._login_btn.setVisible(is_pw)
 
         if is_pw:
-            self._pw_mode_btn.setStyleSheet(
-                'QPushButton { background:#00bfd4; color:#07091c; border:1px solid #00e5ff; border-radius:8px; font-size:12px; font-weight:700; }'
-            )
-            self._face_mode_btn.setStyleSheet(
-                'QPushButton { background:#111630; color:#99aacc; border:1px solid #1e2a45; border-radius:8px; font-size:12px; font-weight:600; }'
-                'QPushButton:hover { border:1px solid #00e5ff; color:#00e5ff; }'
-            )
+            self._pw_mode_btn.setStyleSheet(self._auth_mode_btn_style(active=True))
+            self._face_mode_btn.setStyleSheet(self._auth_mode_btn_style(active=False))
             self._stop_face_stream()
             self._face_armed = False
             self._msg_label.setText('')
             self._username_edit.setFocus()
             return
 
-        self._face_mode_btn.setStyleSheet(
-            'QPushButton { background:#00bfd4; color:#07091c; border:1px solid #00e5ff; border-radius:8px; font-size:12px; font-weight:700; }'
-        )
-        self._pw_mode_btn.setStyleSheet(
-            'QPushButton { background:#111630; color:#99aacc; border:1px solid #1e2a45; border-radius:8px; font-size:12px; font-weight:600; }'
-            'QPushButton:hover { border:1px solid #00e5ff; color:#00e5ff; }'
-        )
+        self._face_mode_btn.setStyleSheet(self._auth_mode_btn_style(active=True))
+        self._pw_mode_btn.setStyleSheet(self._auth_mode_btn_style(active=False))
         self._start_face_stream()
 
     def _start_face_stream(self) -> None:

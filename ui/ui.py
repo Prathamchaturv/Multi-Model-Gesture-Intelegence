@@ -110,7 +110,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QProgressBar, QScrollArea,
     QSizePolicy, QSpacerItem, QMainWindow, QMessageBox,
     QComboBox, QStackedWidget, QLineEdit, QListWidget, QListWidgetItem,
-    QCheckBox, QSlider, QSplitter,
+    QCheckBox, QSlider,
 )
 
 from ui.shared_state  import SharedState
@@ -2589,7 +2589,7 @@ class SystemPanel(QWidget):
 
     def _build(self, state: SharedState) -> None:
         self.setMinimumWidth(280)
-        self.setMaximumWidth(390)
+        self.setMaximumWidth(380)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.setStyleSheet(f'background-color: {BG_DEEP};')
 
@@ -2607,8 +2607,8 @@ class SystemPanel(QWidget):
         container = QWidget()
         container.setStyleSheet(f'background: {BG_DEEP};')
         root = QVBoxLayout(container)
-        root.setContentsMargins(8, 16, 14, 16)
-        root.setSpacing(14)
+        root.setContentsMargins(0, 16, 16, 16)
+        root.setSpacing(12)
         root.addWidget(SystemCard(state))
         self._mode_card = ModeCard(state)
         root.addWidget(self._mode_card)
@@ -2673,22 +2673,10 @@ class MainWindow(QMainWindow):
         main_lay = QHBoxLayout(main_view)
         main_lay.setContentsMargins(0, 0, 0, 0)
         main_lay.setSpacing(0)
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        splitter.setHandleWidth(8)
-        splitter.setStyleSheet(
-            f'QSplitter::handle {{ background: transparent; }} '
-            f'QSplitter::handle:hover {{ background: rgba(34,211,238,0.14); }}'
-        )
         self._vision    = VisionPanel(self._state)
         self._sys_panel = SystemPanel(self._state)
-        splitter.addWidget(self._vision)
-        splitter.addWidget(self._sys_panel)
-        splitter.setStretchFactor(0, 5)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([900, 360])
-        main_lay.addWidget(splitter)
+        main_lay.addWidget(self._vision, stretch=1)
+        main_lay.addWidget(self._sys_panel)
 
         # Gestures tab view
         self._gesture_map_panel = GestureMapPanel(self._state)
@@ -2707,15 +2695,8 @@ class MainWindow(QMainWindow):
         self._body_stack.addWidget(self._help_panel)
         self._body_stack.addWidget(self._settings_panel)
 
-        workspace = QWidget()
-        workspace.setStyleSheet('background: transparent;')
-        workspace_lay = QVBoxLayout(workspace)
-        workspace_lay.setContentsMargins(12, 8, 12, 0)
-        workspace_lay.setSpacing(0)
-        workspace_lay.addWidget(self._body_stack)
-
         body.addWidget(self._sidebar)
-        body.addWidget(workspace, stretch=1)
+        body.addWidget(self._body_stack, stretch=1)
         root.addLayout(body, stretch=1)
 
         self._activity = ActivityLog(self._state)

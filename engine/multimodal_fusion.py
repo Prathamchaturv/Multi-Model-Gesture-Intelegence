@@ -4,7 +4,10 @@ Gesture + voice fusion gate for Media Mode actions.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import time
+
+from engine.unified_pipeline import InputEvent
 
 
 class MultiModalFusionEngine:
@@ -56,3 +59,66 @@ class MultiModalFusionEngine:
             return True, matched
 
         return False, None
+
+
+@dataclass(frozen=True)
+class FusionPolicy:
+    """Policy knobs for resolving near-simultaneous gesture/voice input."""
+
+    voice_priority: bool = True
+    suppress_unstable_gesture_on_voice: bool = True
+    duplicate_window_s: float = 0.3
+    allow_parallel_non_duplicate: bool = False
+
+
+class MultimodalFusionLayer:
+    """
+    Fuses gesture and voice events before they enter the decision pipeline.
+
+    Default behavior:
+    - Voice has priority.
+    - Unstable gesture is dropped when voice is present.
+    - Duplicate command in a short window is deduplicated.
+    """
+
+    def __init__(self, policy: FusionPolicy | None = None) -> None:
+        self._policy = policy or FusionPolicy()
+
+    def merge(
+        self,
+        *,
+        gesture_event: InputEvent | None,
+        voice_event: InputEvent | None,
+        gesture_is_stable: bool,
+        uncertainty_lock_active: bool,
+    ) -> list[InputEvent]:
+        """Return ordered events to process in the unified pipeline."""
+        events: list[InputEvent] = []
+
+        if voice_event is not None:
+            events.append(voice_event)
+
+        if gesture_event is None:
+            return events
+
+        if uncertainty_lock_active:
+            return events
+
+        if voice_event is not None:
+            if self._policy.suppress_unstable_gesture_on_voice and not gesture_is_stable:
+                return events
+
+            if self._is_duplicate(gesture_event, voice_event):
+                if self._policy.voice_priority:
+                    return events
+
+            if not self._policy.allow_parallel_non_duplicate and self._policy.voice_priority:
+                return events
+
+        events.append(gesture_event)
+        return events
+
+    def _is_duplicate(self, gesture_event: InputEvent, voice_event: InputEvent) -> bool:
+        if gesture_event.command != voice_event.command:
+            return False
+        return abs(gesture_event.timestamp - voice_event.timestamp) <= self._policy.duplicate_window_s

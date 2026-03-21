@@ -54,6 +54,7 @@ from engine.activation_manager   import ActivationManager
 from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
 from engine.metrics_manager      import MetricsManager
+from engine.multimodal_fusion    import MultimodalFusionLayer
 from engine.unified_pipeline     import (
     InputEventNormalizer,
     ModeManager,
@@ -510,6 +511,7 @@ class WorkerThread(QThread):
                 mode_manager=mode_manager,
                 face_security=face_security_manager,
             )
+            fusion_layer = MultimodalFusionLayer()
 
             fps_counter = FPSCounter()
             gesture_filter = GestureStabilityFilter(confirm_frames=profile.stability_frames, min_switch_interval_s=0.25)
@@ -602,7 +604,8 @@ class WorkerThread(QThread):
                 if mode_is_system:
                     face_result = face_security_manager.evaluate(frame)
                     face_authorized = face_result.is_authorized
-                    face_status = face_result.status_text
+                    prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
+                    face_status = f'{prefix} | {face_result.status_text}'
                     signature = (face_result.is_authorized, face_result.status_text)
                     if signature != last_face_auth_signature:
                         last_face_auth_signature = signature
@@ -717,6 +720,8 @@ class WorkerThread(QThread):
                 state.set_cooldown(activation_manager.is_in_cooldown)
 
                 pending_events = []
+                gesture_event = None
+                voice_input_event = None
 
                 if uncertainty_streak >= 8:
                     uncertainty_lock_until = max(uncertainty_lock_until, time.time() + 0.8)
@@ -741,17 +746,25 @@ class WorkerThread(QThread):
                                 gesture=gesture,
                                 confidence=confidence,
                             )
-                            pending_events.append((gesture_event, None, mode_manager.current_mode))
 
                     if voice_event is not None and voice_event.command != '__unmapped__' and voice_enabled_for_fusion:
                         if (not voice_system_mode_only) or mode_manager.current_mode == 'System Mode':
                             voice_command = voice_event.command
-                            voice_input = InputEventNormalizer.from_voice(
+                            voice_input_event = InputEventNormalizer.from_voice(
                                 command=voice_command,
                                 confidence=1.0,
                                 timestamp=voice_event.timestamp,
                             )
-                            pending_events.append((voice_input, None, 'Voice'))
+
+                    fused_events = fusion_layer.merge(
+                        gesture_event=gesture_event,
+                        voice_event=voice_input_event,
+                        gesture_is_stable=bool(gesture_event is not None),
+                        uncertainty_lock_active=time.time() < uncertainty_lock_until,
+                    )
+                    for fused_event in fused_events:
+                        label = 'Voice' if fused_event.type == 'voice' else mode_manager.current_mode
+                        pending_events.append((fused_event, None, label))
 
                 for event, forced_action, source_label in pending_events:
                     if forced_action is not None:

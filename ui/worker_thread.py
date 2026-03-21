@@ -825,6 +825,9 @@ class WorkerThread(QThread):
                     if result.mode_changed:
                         metrics.record_mode_switch()
                         state.set_mode(result.mode)
+                        # Keep manual mode request in sync with pipeline-driven switches.
+                        if state.requested_mode != result.mode:
+                            state.request_mode(result.mode)
                         state.emit_log(_ts(), 'MODE', f'Switched to {result.mode}')
 
                     if result.blocked_reason == 'face_unauthorized':

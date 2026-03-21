@@ -1,0 +1,12 @@
+{
+  "base_cursor_sensitivity": 1.0,
+  "min_cursor_sensitivity": 0.6,
+  "max_cursor_sensitivity": 1.8,
+  "near_hand_distance": 0.22,
+  "far_hand_distance": 0.08,
+  "gesture_hold_seconds": 1.0,
+  "stability_frames": 4,
+  "mode_switch_hold_seconds": 1.0,
+  "mode_switch_cooldown_seconds": 2.0,
+  "debug_overlay_enabled": false
+}

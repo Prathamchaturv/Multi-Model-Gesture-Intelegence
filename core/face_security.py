@@ -43,12 +43,16 @@ class FaceSecurityManager:
         eval_interval_s: float = 0.08,
         away_delay_s: float = 2.5,
         return_confirm_s: float = 0.7,
+        unlock_confirm_s: float = 0.45,
+        lock_confirm_s: float = 0.6,
     ) -> None:
         self._enabled = bool(enabled)
         self._similarity_threshold = float(similarity_threshold)
         self._eval_interval_s = max(0.0, float(eval_interval_s))
         self._away_delay_s = max(0.5, float(away_delay_s))
         self._return_confirm_s = max(0.1, float(return_confirm_s))
+        self._unlock_confirm_s = max(0.05, float(unlock_confirm_s))
+        self._lock_confirm_s = max(0.05, float(lock_confirm_s))
 
         root = Path(__file__).parent.parent
         self._authorized_image_path = Path(authorized_image_path)
@@ -78,6 +82,10 @@ class FaceSecurityManager:
             system_paused=False,
             similarity=None,
         )
+        self._stable_result = self._last_result
+        self._has_stable_eval = False
+        self._pending_auth_state: bool | None = None
+        self._pending_auth_since: float = 0.0
 
     @property
     def has_reference(self) -> bool:
@@ -108,7 +116,7 @@ class FaceSecurityManager:
 
         now = time.time()
         if self._eval_interval_s > 0 and (now - self._last_eval_ts) < self._eval_interval_s:
-            return self._last_result
+            return self._stable_result
         self._last_eval_ts = now
 
         if self._reference_encoding is None:
@@ -120,7 +128,8 @@ class FaceSecurityManager:
                 not self._is_present_confirmed,
                 None,
             )
-            return self._last_result
+            self._stable_result = self._stabilize_auth(self._last_result, now)
+            return self._stable_result
 
         face_bbox = self._detect_face_bbox(frame_bgr)
         self._update_presence(face_bbox is not None, now)
@@ -134,7 +143,8 @@ class FaceSecurityManager:
                 True,
                 None,
             )
-            return self._last_result
+            self._stable_result = self._stabilize_auth(self._last_result, now)
+            return self._stable_result
 
         if face_bbox is None:
             self._last_result = FaceAuthResult(
@@ -145,7 +155,8 @@ class FaceSecurityManager:
                 False,
                 None,
             )
-            return self._last_result
+            self._stable_result = self._stabilize_auth(self._last_result, now)
+            return self._stable_result
 
         encoding = self._encode_face(frame_bgr, face_bbox)
         if encoding is None:
@@ -157,7 +168,8 @@ class FaceSecurityManager:
                 False,
                 None,
             )
-            return self._last_result
+            self._stable_result = self._stabilize_auth(self._last_result, now)
+            return self._stable_result
 
         similarity = self._cosine_similarity(encoding, self._reference_encoding)
         if similarity >= self._similarity_threshold:
@@ -178,7 +190,45 @@ class FaceSecurityManager:
                 False,
                 similarity,
             )
-        return self._last_result
+        self._stable_result = self._stabilize_auth(self._last_result, now)
+        return self._stable_result
+
+    def _stabilize_auth(self, raw: FaceAuthResult, now: float) -> FaceAuthResult:
+        """Debounce authorization flips to avoid UI/action flicker on transient frames."""
+        if not self._has_stable_eval:
+            self._stable_result = raw
+            self._has_stable_eval = True
+            self._pending_auth_state = None
+            self._pending_auth_since = 0.0
+            return self._stable_result
+
+        # Presence pause/resume transitions should apply immediately.
+        if raw.system_paused != self._stable_result.system_paused:
+            self._stable_result = raw
+            self._pending_auth_state = None
+            self._pending_auth_since = 0.0
+            return self._stable_result
+
+        if raw.is_authorized == self._stable_result.is_authorized:
+            self._pending_auth_state = None
+            self._pending_auth_since = 0.0
+            self._stable_result = raw
+            return self._stable_result
+
+        # Start (or reset) pending transition when raw state differs from stable state.
+        if self._pending_auth_state is None or self._pending_auth_state != raw.is_authorized:
+            self._pending_auth_state = raw.is_authorized
+            self._pending_auth_since = now
+            return self._stable_result
+
+        required = self._unlock_confirm_s if raw.is_authorized else self._lock_confirm_s
+        if (now - self._pending_auth_since) >= required:
+            self._stable_result = raw
+            self._pending_auth_state = None
+            self._pending_auth_since = 0.0
+            return self._stable_result
+
+        return self._stable_result
 
     def _update_presence(self, face_visible: bool, now: float) -> None:
         if face_visible:

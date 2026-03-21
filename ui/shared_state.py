@@ -54,6 +54,8 @@ class SharedState(QObject):
     landmarks_changed       = pyqtSignal(object)
     face_auth_changed       = pyqtSignal(bool, str)
     voice_command_changed   = pyqtSignal(str)
+    cursor_sensitivity_changed = pyqtSignal(float)
+    metrics_changed         = pyqtSignal(dict)
 
     # Batched update – emits a snapshot dict for panels that want everything
     snapshot_ready          = pyqtSignal(dict)
@@ -81,6 +83,13 @@ class SharedState(QObject):
         self._face_authorized  = True
         self._face_status      = 'Face Auth: Idle'
         self._voice_command    = ''
+        self._cursor_sensitivity = 1.0
+        self._metrics = {
+            'gesture_accuracy_pct': 0.0,
+            'false_activation_rate_pct': 0.0,
+            'avg_response_latency_ms': 0.0,
+            'mode_switches_per_min': 0.0,
+        }
 
     # ------------------------------------------------------------------ getters
     @property
@@ -107,6 +116,10 @@ class SharedState(QObject):
     def face_status(self)     -> str:   return self._face_status
     @property
     def voice_command(self)   -> str:   return self._voice_command
+    @property
+    def cursor_sensitivity(self) -> float: return self._cursor_sensitivity
+    @property
+    def metrics(self) -> dict: return dict(self._metrics)
 
     # ------------------------------------------------------------------ setters
     def set_system_active(self, value: bool) -> None:
@@ -181,6 +194,24 @@ class SharedState(QObject):
             self._voice_command = value
             self.voice_command_changed.emit(value)
 
+    def set_cursor_sensitivity(self, value: float) -> None:
+        """Broadcast dynamic cursor sensitivity from calibration policy."""
+        clamped = round(max(0.1, min(3.0, float(value))), 2)
+        if self._cursor_sensitivity != clamped:
+            self._cursor_sensitivity = clamped
+            self.cursor_sensitivity_changed.emit(clamped)
+
+    def set_metrics(self, metrics: dict) -> None:
+        """Broadcast latest lightweight performance metrics."""
+        payload = {
+            'gesture_accuracy_pct': float(metrics.get('gesture_accuracy_pct', 0.0)),
+            'false_activation_rate_pct': float(metrics.get('false_activation_rate_pct', 0.0)),
+            'avg_response_latency_ms': float(metrics.get('avg_response_latency_ms', 0.0)),
+            'mode_switches_per_min': float(metrics.get('mode_switches_per_min', 0.0)),
+        }
+        self._metrics = payload
+        self.metrics_changed.emit(dict(payload))
+
     def emit_log(self, timestamp: str, category: str, description: str) -> None:
         """Convenience wrapper to push an activity log event."""
         self.log_event.emit(timestamp, category, description)
@@ -201,6 +232,8 @@ class SharedState(QObject):
             'face_authorized': self._face_authorized,
             'face_status': self._face_status,
             'voice_command': self._voice_command,
+            'cursor_sensitivity': self._cursor_sensitivity,
+            'metrics': dict(self._metrics),
         }
 
     def _emit_snapshot(self) -> None:

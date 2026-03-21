@@ -47,11 +47,13 @@ from core.adaptive_gesture_learning import (
     CustomGestureStore,
     MultiFrameGestureConfirmation,
 )
+from core.calibration            import CalibrationManager
 from core.face_security          import FaceSecurityManager
 from core.voice_control          import VoiceCommandListener
 from engine.activation_manager   import ActivationManager
 from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
+from engine.metrics_manager      import MetricsManager
 from engine.unified_pipeline     import (
     InputEventNormalizer,
     ModeManager,
@@ -100,6 +102,12 @@ class GestureStabilityFilter:
         self._recent: deque[str] = deque(maxlen=self._confirm_frames)
         self._last_confirmed: str | None = None
         self._last_confirmed_change_ts: float = 0.0
+
+    def set_confirm_frames(self, confirm_frames: int) -> None:
+        """Apply a new confirmation frame window without restarting the worker."""
+        self._confirm_frames = max(3, int(confirm_frames))
+        self._recent = deque(maxlen=self._confirm_frames)
+        self._last_confirmed = None
 
     def update(self, raw_gesture: str | None, hand_present: bool) -> tuple[str | None, str]:
         """
@@ -238,6 +246,7 @@ def _draw_overlay(
     fps: float,
     face_status: str | None = None,
     face_authorized: bool | None = None,
+    debug_text: str | None = None,
 ) -> None:
     """Annotate frame in-place with gesture/mode/state HUD."""
     h, w = frame.shape[:2]
@@ -280,6 +289,17 @@ def _draw_overlay(
         cv2.putText(frame, gesture, (16, h - 20),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, _ACCENT, 2)
 
+    if debug_text:
+        cv2.putText(
+            frame,
+            debug_text,
+            (16, h - 44),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            _WHITE,
+            1,
+        )
+
 
 def _frame_to_qimage(frame) -> QImage:
     """Convert a BGR numpy frame to QImage (RGB888)."""
@@ -304,6 +324,8 @@ class WorkerThread(QThread):
         self._running = False
         self._frame_lock = threading.Lock()
         self._latest_frame_bgr = None
+        self._settings_lock = threading.Lock()
+        self._reload_calibration_requested = False
 
         # Pipeline components (created in run() so they start on the right thread)
         self._config:    Config | None = None
@@ -316,6 +338,11 @@ class WorkerThread(QThread):
     def stop(self) -> None:
         """Request the pipeline to stop."""
         self._running = False
+
+    def reload_calibration(self) -> None:
+        """Request a hot reload of calibration settings on the worker thread."""
+        with self._settings_lock:
+            self._reload_calibration_requested = True
 
     def capture_authorized_face(self) -> tuple[bool, str]:
         """Capture the latest camera face and save it as authorized reference image."""
@@ -413,6 +440,8 @@ class WorkerThread(QThread):
             )
 
             gesture_classifier = GestureClassifier()
+            calibration = CalibrationManager()
+            profile = calibration.profile
             adaptive_enabled = bool(config.get('adaptive_gesture.enabled', True))
             custom_matcher: AdaptiveGestureMatcher | None = None
             custom_confirmation: MultiFrameGestureConfirmation | None = None
@@ -433,13 +462,17 @@ class WorkerThread(QThread):
                 )
 
             activation_manager = ActivationManager(
-                open_palm_duration   = config.get('activation.open_palm_duration'),
+                open_palm_duration   = profile.gesture_hold_seconds,
                 cooldown_duration    = config.get('activation.cooldown_duration'),
-                stability_threshold  = config.get('activation.stability_threshold'),
+                stability_threshold  = profile.stability_frames,
             )
 
-            decision_engine = DecisionEngine()
-            mode_manager = ModeManager(cooldown_s=2.0, initial_mode=decision_engine.current_mode)
+            decision_engine = DecisionEngine(
+                stability_frames=profile.stability_frames,
+                hold_seconds=profile.mode_switch_hold_seconds,
+                cooldown_seconds=profile.mode_switch_cooldown_seconds,
+            )
+            mode_manager = ModeManager(cooldown_s=profile.mode_switch_cooldown_seconds, initial_mode=decision_engine.current_mode)
             face_security_cfg = _load_face_security_settings(config)
             face_security_manager = FaceSecurityManager(
                 enabled=bool(face_security_cfg.get('enabled', True)),
@@ -464,7 +497,8 @@ class WorkerThread(QThread):
             )
 
             fps_counter = FPSCounter()
-            gesture_filter = GestureStabilityFilter(confirm_frames=4, min_switch_interval_s=0.25)
+            gesture_filter = GestureStabilityFilter(confirm_frames=profile.stability_frames, min_switch_interval_s=0.25)
+            metrics = MetricsManager()
             last_logged_gesture: str | None = None
             last_no_hand_log = 0.0
             last_low_conf_log = 0.0
@@ -495,6 +529,23 @@ class WorkerThread(QThread):
                 # ----------------------------------------------------------
                 # Voice command polling (non-blocking)
                 # ----------------------------------------------------------
+                with self._settings_lock:
+                    should_reload_calibration = self._reload_calibration_requested
+                    self._reload_calibration_requested = False
+
+                if should_reload_calibration:
+                    profile = calibration.load()
+                    activation_manager._open_palm_duration = profile.gesture_hold_seconds
+                    activation_manager._stability_threshold = profile.stability_frames
+                    decision_engine.set_runtime_timing(
+                        stability_frames=profile.stability_frames,
+                        hold_seconds=profile.mode_switch_hold_seconds,
+                        cooldown_seconds=profile.mode_switch_cooldown_seconds,
+                    )
+                    mode_manager._cooldown_s = profile.mode_switch_cooldown_seconds
+                    gesture_filter.set_confirm_frames(profile.stability_frames)
+                    state.emit_log(_ts(), 'SYSTEM', 'Calibration reloaded from settings')
+
                 voice_event = None
                 if voice_listener is not None:
                     voice_event = voice_listener.poll_latest()
@@ -545,6 +596,9 @@ class WorkerThread(QThread):
                 hand_data = hands_info.get('right') or hands_info.get('left')
                 if hand_data:
                     state.set_landmarks(hand_data.get('landmarks'))
+                    hand_distance = calibration.estimate_hand_distance(hand_data.get('landmarks'))
+                    dynamic_sensitivity = calibration.cursor_sensitivity_for_distance(hand_distance)
+                    state.set_cursor_sensitivity(dynamic_sensitivity)
                     confidence = float(hand_data.get('confidence', 0.0))
 
                     if confidence < low_conf_threshold:
@@ -584,6 +638,7 @@ class WorkerThread(QThread):
                                     last_invalid_log = now
                             else:
                                 gesture, stable_state = gesture_filter.update(raw_gesture, hand_present=True)
+                                metrics.record_gesture_event(confirmed=(stable_state == 'stable' and gesture is not None))
                                 if stable_state == 'stable' and gesture is not None:
                                     ui_gesture_text = gesture
                                     if gesture != last_logged_gesture:
@@ -602,6 +657,7 @@ class WorkerThread(QThread):
                 else:
                     gesture, _ = gesture_filter.update(None, hand_present=False)
                     state.set_landmarks(None)
+                    state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
                     if custom_confirmation is not None:
                         custom_confirmation.reset()
                     ui_gesture_text = 'No hand detected'
@@ -650,9 +706,11 @@ class WorkerThread(QThread):
                         if mode_manager.current_mode == 'System Mode':
                             auth = face_security_manager.evaluate(frame) if face_security_manager is not None else None
                             if auth is not None and not auth.is_authorized:
+                                metrics.record_activation_attempt(succeeded=False)
                                 state.emit_log(_ts(), 'SECURITY', f'Blocked action in System Mode: {auth.status_text}')
                                 continue
                         action_executor.execute(forced_action)
+                        metrics.record_activation_attempt(succeeded=True)
                         label = action_executor._LABELS.get(forced_action, forced_action)
                         state.emit_log(_ts(), 'ACTION', f'{label}  [{source_label}]')
                         state.set_action_executed(forced_action)
@@ -662,13 +720,16 @@ class WorkerThread(QThread):
                     result = unified_pipeline.process_event(event, frame_bgr=frame)
 
                     if result.mode_changed:
+                        metrics.record_mode_switch()
                         state.set_mode(result.mode)
                         state.emit_log(_ts(), 'MODE', f'Switched to {result.mode}')
 
                     if result.blocked_reason == 'face_unauthorized':
+                        metrics.record_activation_attempt(succeeded=False)
                         state.emit_log(_ts(), 'SECURITY', f'Blocked action in System Mode: {result.security_status}')
 
                     if result.action:
+                        metrics.record_activation_attempt(succeeded=True)
                         label = action_executor._LABELS.get(result.action, result.action)
                         state.emit_log(_ts(), 'ACTION', f'{label}  [{source_label}]')
                         state.set_action_executed(result.action)
@@ -687,10 +748,27 @@ class WorkerThread(QThread):
                 state.set_confidence(confidence)
                 state.set_fps(fps_counter.fps)
                 state.set_latency(latency_ms)
+                metrics.record_latency(latency_ms)
+                snap = metrics.flush_report()
+                state.set_metrics({
+                    'gesture_accuracy_pct': snap.gesture_accuracy_pct,
+                    'false_activation_rate_pct': snap.false_activation_rate_pct,
+                    'avg_response_latency_ms': snap.avg_response_latency_ms,
+                    'mode_switches_per_min': snap.mode_switches_per_min,
+                })
 
                 # ----------------------------------------------------------
                 # Annotate and emit frame
                 # ----------------------------------------------------------
+                debug_text = None
+                if profile.debug_overlay_enabled:
+                    debug_text = (
+                        f'Debug | Sens:{state.cursor_sensitivity:.2f} '
+                        f'Acc:{snap.gesture_accuracy_pct:.1f}% '
+                        f'FalseAct:{snap.false_activation_rate_pct:.1f}% '
+                        f'AvgLat:{snap.avg_response_latency_ms:.1f}ms'
+                    )
+
                 _draw_overlay(
                     frame,
                     gesture,
@@ -699,6 +777,7 @@ class WorkerThread(QThread):
                     fps_counter.fps,
                     face_status=face_status if mode_manager.current_mode == 'System Mode' else None,
                     face_authorized=face_authorized if mode_manager.current_mode == 'System Mode' else None,
+                    debug_text=debug_text,
                 )
 
                 self.frame_ready.emit(_frame_to_qimage(frame))
@@ -710,6 +789,7 @@ class WorkerThread(QThread):
                 voice_listener.stop()
             if face_security_manager is not None:
                 face_security_manager.close()
+            metrics.flush_report(force=True)
             state.set_system_active(False)
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline stopped')
             log_pipeline_state('Pipeline stopped')

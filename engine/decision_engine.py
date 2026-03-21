@@ -154,7 +154,13 @@ class DecisionEngine:
         },
     }
 
-    def __init__(self, config_path: str | Path | None = None):
+    def __init__(
+        self,
+        config_path: str | Path | None = None,
+        stability_frames: int = STABILITY_FRAMES,
+        hold_seconds: float = HOLD_SECONDS,
+        cooldown_seconds: float = COOLDOWN_SECONDS,
+    ):
         self._mode_switch_map: dict[str, str] = {}
         self._voice_mode_switch_map: dict[str, str] = {}
         self._action_maps: dict[str, dict[str, str]] = {}
@@ -162,6 +168,9 @@ class DecisionEngine:
         self._action_whitelist: dict[str, set[str]] = {}
 
         self.current_mode: str = DEFAULT_MODE
+        self._stability_frames = max(2, int(stability_frames))
+        self._hold_seconds = max(0.1, float(hold_seconds))
+        self._cooldown_seconds = max(0.1, float(cooldown_seconds))
         self._candidate_mode: str | None = None
         self._stable_count: int = 0
         self._hold_start: float = 0.0
@@ -174,6 +183,20 @@ class DecisionEngine:
         self._last_reload_check: float = 0.0
         self._reload_check_interval_seconds: float = 0.2
         self._load_map(self._config_path)
+
+    def set_runtime_timing(
+        self,
+        stability_frames: int | None = None,
+        hold_seconds: float | None = None,
+        cooldown_seconds: float | None = None,
+    ) -> None:
+        """Update timing/stability knobs at runtime (used by calibration)."""
+        if stability_frames is not None:
+            self._stability_frames = max(2, int(stability_frames))
+        if hold_seconds is not None:
+            self._hold_seconds = max(0.1, float(hold_seconds))
+        if cooldown_seconds is not None:
+            self._cooldown_seconds = max(0.1, float(cooldown_seconds))
 
     def process(self, gesture: str | None) -> tuple[str | None, bool]:
         """Backward-compatible gesture path used by existing callers/tests."""
@@ -254,9 +277,9 @@ class DecisionEngine:
     def mode_stability_progress(self) -> float:
         if self._candidate_mode is None:
             return 0.0
-        frame_prog = min(self._stable_count / STABILITY_FRAMES, 1.0)
+        frame_prog = min(self._stable_count / self._stability_frames, 1.0)
         if self._hold_start > 0:
-            time_prog = min((time.time() - self._hold_start) / HOLD_SECONDS, 1.0)
+            time_prog = min((time.time() - self._hold_start) / self._hold_seconds, 1.0)
         else:
             time_prog = 0.0
         return (frame_prog * 0.5 + time_prog * 0.5)
@@ -265,7 +288,7 @@ class DecisionEngine:
         raw_target = self._mode_switch_map.get(gesture)
         tick = time.time() if now is None else float(now)
 
-        if tick - self._last_switch_time < COOLDOWN_SECONDS:
+        if tick - self._last_switch_time < self._cooldown_seconds:
             return False
 
         if raw_target == _NEXT_MODE:
@@ -281,7 +304,7 @@ class DecisionEngine:
             return False
 
         self._stable_count += 1
-        if self._stable_count >= STABILITY_FRAMES and (tick - self._hold_start) >= HOLD_SECONDS:
+        if self._stable_count >= self._stability_frames and (tick - self._hold_start) >= self._hold_seconds:
             old_mode = self.current_mode
             self.current_mode = target_mode
             self._last_switch_time = tick

@@ -88,6 +88,27 @@ class TestFaceSecurityManager(unittest.TestCase):
         self.assertFalse(result.is_authorized)
         self.assertEqual(result.status_text, 'Unknown User X')
 
+    def test_hysteresis_prevents_transient_relock_for_authorized_user(self):
+        mgr, encoding_path = self._make_manager(enabled=True, threshold=0.84)
+        with open(encoding_path, 'w', encoding='utf-8') as fh:
+            json.dump({'encoding': [1.0, 0.0]}, fh)
+        mgr._reference_encoding = mgr._load_reference_from_file()
+
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        mgr._detect_face_bbox = MagicMock(return_value=(0, 0, 64, 64))
+
+        # First frame clearly authorizes.
+        mgr._encode_face = MagicMock(return_value=np.array([1.0, 0.0], dtype=np.float32))
+        first = mgr.evaluate(frame)
+
+        # Next frame dips below unlock threshold but stays above lock threshold.
+        mgr._encode_face = MagicMock(return_value=np.array([0.80, 0.60], dtype=np.float32))
+        second = mgr.evaluate(frame)
+
+        self.assertTrue(first.is_authorized)
+        self.assertTrue(second.is_authorized)
+        self.assertIn('User Detected', second.status_text)
+
     def test_marks_user_away_after_delay(self):
         mgr, encoding_path = self._make_manager(enabled=True, threshold=0.8)
         with open(encoding_path, 'w', encoding='utf-8') as fh:

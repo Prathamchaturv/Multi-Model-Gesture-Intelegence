@@ -39,6 +39,7 @@ class FaceSecurityManager:
         authorized_image_path: str = 'config/authorized_face.jpg',
         authorized_encoding_path: str = 'config/authorized_face_encoding.json',
         similarity_threshold: float = 0.84,
+        similarity_hysteresis: float = 0.05,
         min_detection_confidence: float = 0.6,
         eval_interval_s: float = 0.08,
         away_delay_s: float = 2.5,
@@ -47,7 +48,10 @@ class FaceSecurityManager:
         lock_confirm_s: float = 0.6,
     ) -> None:
         self._enabled = bool(enabled)
-        self._similarity_threshold = float(similarity_threshold)
+        threshold = float(similarity_threshold)
+        hysteresis = max(0.0, float(similarity_hysteresis))
+        self._unlock_similarity_threshold = threshold
+        self._lock_similarity_threshold = max(0.0, threshold - hysteresis)
         self._eval_interval_s = max(0.0, float(eval_interval_s))
         self._away_delay_s = max(0.5, float(away_delay_s))
         self._return_confirm_s = max(0.1, float(return_confirm_s))
@@ -172,7 +176,13 @@ class FaceSecurityManager:
             return self._stable_result
 
         similarity = self._cosine_similarity(encoding, self._reference_encoding)
-        if similarity >= self._similarity_threshold:
+        # Use threshold hysteresis so brief score dips do not immediately lock a valid user.
+        if self._stable_result.is_authorized:
+            is_authorized = similarity >= self._lock_similarity_threshold
+        else:
+            is_authorized = similarity >= self._unlock_similarity_threshold
+
+        if is_authorized:
             self._last_result = FaceAuthResult(
                 True,
                 'User Detected - System Active',

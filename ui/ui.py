@@ -257,12 +257,20 @@ class ActivityLog(QWidget):
         state.log_event.connect(self._on_log_event)
 
     def _build(self) -> None:
-        self.setFixedHeight(76)
-        self.setStyleSheet(f'background-color: {BG_CARD}; border-top: 1px solid {BORDER};')
+        self.setFixedHeight(96)
+        self.setStyleSheet('background: transparent;')
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(20, 6, 20, 6)
-        outer.setSpacing(4)
+        outer.setContentsMargins(14, 0, 14, 10)
+        outer.setSpacing(0)
+
+        shell = QFrame()
+        shell.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        shell_lay = QVBoxLayout(shell)
+        shell_lay.setContentsMargins(12, 8, 12, 8)
+        shell_lay.setSpacing(4)
 
         title_row = QHBoxLayout()
         title = QLabel('ACTIVITY LOG')
@@ -274,7 +282,7 @@ class ActivityLog(QWidget):
         title_row.addWidget(title)
         title_row.addStretch()
         title_row.addWidget(self._count_lbl)
-        outer.addLayout(title_row)
+        shell_lay.addLayout(title_row)
 
         self._scroll = QScrollArea()
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -290,7 +298,8 @@ class ActivityLog(QWidget):
         self._pills_lay.addStretch()
 
         self._scroll.setWidget(self._inner)
-        outer.addWidget(self._scroll)
+        shell_lay.addWidget(self._scroll)
+        outer.addWidget(shell)
 
     @pyqtSlot(str, str, str)
     def _on_log_event(self, timestamp: str, category: str, description: str) -> None:
@@ -317,7 +326,7 @@ class ActivityLog(QWidget):
 # Sidebar  (was ui/sidebar.py)
 # ===========================================================================
 
-EXPANDED_W  = 220
+EXPANDED_W  = 236
 COLLAPSED_W = 56
 ANIM_MS     = 200
 
@@ -376,8 +385,8 @@ class Sidebar(QWidget):
         nav_container = QWidget()
         nav_container.setStyleSheet('background: transparent; border: none;')
         nav_lay = QVBoxLayout(nav_container)
-        nav_lay.setContentsMargins(8, 12, 8, 0)
-        nav_lay.setSpacing(4)
+        nav_lay.setContentsMargins(8, 14, 8, 0)
+        nav_lay.setSpacing(6)
         for tab_id, icon, label in _TABS:
             btn = QPushButton(f'{icon}  {label}')
             btn.setObjectName('nav_btn')
@@ -2711,12 +2720,20 @@ class MainWindow(QMainWindow):
         workspace_lay.setSpacing(0)
         workspace_lay.addWidget(self._body_stack)
 
-        body.addWidget(self._sidebar)
-        body.addWidget(workspace, stretch=1)
-        root.addLayout(body, stretch=1)
-
         self._activity = ActivityLog(self._state)
-        root.addWidget(self._activity)
+        content_col = QVBoxLayout()
+        content_col.setContentsMargins(0, 0, 0, 0)
+        content_col.setSpacing(8)
+        content_col.addWidget(workspace, stretch=1)
+        content_col.addWidget(self._activity)
+
+        content_host = QWidget()
+        content_host.setStyleSheet(f'background: {BG_DEEP};')
+        content_host.setLayout(content_col)
+
+        body.addWidget(self._sidebar)
+        body.addWidget(content_host, stretch=1)
+        root.addLayout(body, stretch=1)
 
     @pyqtSlot(str)
     def _on_tab_selected(self, tab_id: str) -> None:

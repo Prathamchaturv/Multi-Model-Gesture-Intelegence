@@ -64,10 +64,13 @@ from utils.config                import Config
 from utils.logger                import (
     get_mmgi_logger,
     log_action_executed,
+    log_face_authorization_event,
     log_gesture_detected,
+    log_lifecycle_event,
     log_low_confidence,
     log_pipeline_state,
     log_runtime_error,
+    log_voice_command_event,
 )
 from ui.shared_state             import SharedState
 
@@ -429,7 +432,19 @@ class WorkerThread(QThread):
                 height = config.get('camera.height'),
                 fps    = config.get('camera.fps'),
             )
-            if not camera.open():
+            camera_retry_attempts = int(config.get('lifecycle.camera_retry_attempts', 3) or 3)
+            camera_retry_delay_s = float(config.get('lifecycle.camera_retry_delay_s', 1.0) or 1.0)
+            camera_opened = False
+            for attempt in range(1, camera_retry_attempts + 1):
+                if camera.open():
+                    camera_opened = True
+                    break
+                log_runtime_error(f'Camera open failed (attempt {attempt}/{camera_retry_attempts})')
+                state.emit_log(_ts(), 'ERROR', f'Camera unavailable (attempt {attempt}/{camera_retry_attempts})')
+                time.sleep(camera_retry_delay_s)
+
+            if not camera_opened:
+                log_lifecycle_event('camera_init', 'failed', 'All retry attempts exhausted')
                 self.error.emit('Could not open camera.')
                 return
 
@@ -503,12 +518,18 @@ class WorkerThread(QThread):
             last_no_hand_log = 0.0
             last_low_conf_log = 0.0
             last_invalid_log = 0.0
+            uncertainty_streak = 0
+            uncertainty_lock_until = 0.0
+            last_uncertainty_log = 0.0
+            last_face_auth_signature: tuple[bool, str] | None = None
+            voice_backoff_until = 0.0
 
             warning_interval = 1.5
             error_interval = 1.5
 
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
+            log_lifecycle_event('pipeline', 'started', 'Worker loop active')
             state.set_face_auth(True, 'Face Security: Login Only')
 
             # ----------------------------------------------------------------
@@ -550,19 +571,27 @@ class WorkerThread(QThread):
                 if voice_listener is not None:
                     voice_event = voice_listener.poll_latest()
                     if voice_event is not None:
-                        if voice_event.command == '__unmapped__':
-                            transcript = voice_event.transcript.strip()
-                            if len(transcript) > 48:
-                                transcript = transcript[:45] + '...'
-                            state.set_voice_command(f'Heard: {transcript}')
-                            state.emit_log(_ts(), 'SYSTEM', f'Voice heard (unmapped): {voice_event.transcript}')
+                        if time.time() < voice_backoff_until:
+                            state.set_voice_command('Voice in recovery window...')
+                            voice_event = None
                         else:
-                            voice_text = _voice_label(voice_event.command)
-                            state.set_voice_command(voice_text)
-                            state.emit_log(_ts(), 'ACTION', f'Voice command detected: {voice_text}')
+                            if voice_event.command == '__unmapped__':
+                                transcript = voice_event.transcript.strip()
+                                if len(transcript) > 48:
+                                    transcript = transcript[:45] + '...'
+                                state.set_voice_command(f'Heard: {transcript}')
+                                log_voice_command_event(voice_event.transcript, mapped=False, details='unmapped')
+                                state.emit_log(_ts(), 'SYSTEM', f'Voice heard (unmapped): {voice_event.transcript}')
+                            else:
+                                voice_text = _voice_label(voice_event.command)
+                                state.set_voice_command(voice_text)
+                                log_voice_command_event(voice_event.command, mapped=True, details='recognized')
+                                state.emit_log(_ts(), 'ACTION', f'Voice command detected: {voice_text}')
                     elif voice_listener.last_error and voice_listener.last_error != last_voice_error:
                         last_voice_error = voice_listener.last_error
+                        voice_backoff_until = time.time() + 5.0
                         state.set_voice_command(f'Voice Error: {last_voice_error}')
+                        log_voice_command_event('voice_error', mapped=False, details=last_voice_error)
                         state.emit_log(_ts(), 'SYSTEM', f'Voice listener error: {last_voice_error}')
                     elif voice_listener.is_enabled and voice_listener.is_ready and state.voice_command == 'Listening...':
                         state.set_voice_command('Mic Active - Speak Command')
@@ -574,6 +603,14 @@ class WorkerThread(QThread):
                     face_result = face_security_manager.evaluate(frame)
                     face_authorized = face_result.is_authorized
                     face_status = face_result.status_text
+                    signature = (face_result.is_authorized, face_result.status_text)
+                    if signature != last_face_auth_signature:
+                        last_face_auth_signature = signature
+                        log_face_authorization_event(
+                            face_result.is_authorized,
+                            face_result.status_text,
+                            face_result.similarity,
+                        )
                 state.set_face_auth(face_authorized, face_status)
 
                 # ----------------------------------------------------------
@@ -602,6 +639,7 @@ class WorkerThread(QThread):
                     confidence = float(hand_data.get('confidence', 0.0))
 
                     if confidence < low_conf_threshold:
+                        uncertainty_streak += 1
                         gesture, _ = gesture_filter.update(None, hand_present=True)
                         ui_gesture_text = 'Gesture unclear'
                         last_logged_gesture = None
@@ -629,6 +667,7 @@ class WorkerThread(QThread):
                             finger_states = hand_data['finger_states']
                             raw_gesture = gesture_classifier.classify(finger_states)
                             if raw_gesture == 'Unknown':
+                                uncertainty_streak += 1
                                 gesture, _ = gesture_filter.update(None, hand_present=True)
                                 ui_gesture_text = 'Gesture unclear'
                                 last_logged_gesture = None
@@ -640,11 +679,13 @@ class WorkerThread(QThread):
                                 gesture, stable_state = gesture_filter.update(raw_gesture, hand_present=True)
                                 metrics.record_gesture_event(confirmed=(stable_state == 'stable' and gesture is not None))
                                 if stable_state == 'stable' and gesture is not None:
+                                    uncertainty_streak = 0
                                     ui_gesture_text = gesture
                                     if gesture != last_logged_gesture:
                                         log_gesture_detected(gesture)
                                         last_logged_gesture = gesture
                                 else:
+                                    uncertainty_streak += 1
                                     ui_gesture_text = 'Gesture unclear'
                                     last_logged_gesture = None
                         else:
@@ -655,6 +696,7 @@ class WorkerThread(QThread):
                     if detection_result is not None:
                         hand_tracker.draw_landmarks(frame, detection_result)
                 else:
+                    uncertainty_streak += 1
                     gesture, _ = gesture_filter.update(None, hand_present=False)
                     state.set_landmarks(None)
                     state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
@@ -676,30 +718,40 @@ class WorkerThread(QThread):
 
                 pending_events = []
 
-                if custom_action and should_execute:
-                    # Custom gestures bypass map lookup but still use unified execution path.
-                    custom_event = InputEventNormalizer.from_gesture(
-                        gesture='Custom Action',
-                        confidence=confidence,
-                    )
-                    pending_events.append((custom_event, custom_action, 'Custom Gesture'))
-                elif gesture:
-                    if decision_engine.is_mode_switch(gesture) or should_execute:
-                        gesture_event = InputEventNormalizer.from_gesture(
-                            gesture=gesture,
+                if uncertainty_streak >= 8:
+                    uncertainty_lock_until = max(uncertainty_lock_until, time.time() + 0.8)
+                    uncertainty_streak = 0
+
+                if time.time() < uncertainty_lock_until:
+                    if time.time() - last_uncertainty_log > 1.0:
+                        last_uncertainty_log = time.time()
+                        state.emit_log(_ts(), 'SYSTEM', 'Safety lock: actions paused due to uncertain input')
+                        log_runtime_error('Safety lock active due to uncertain gesture input')
+                else:
+                    if custom_action and should_execute:
+                        # Custom gestures bypass map lookup but still use unified execution path.
+                        custom_event = InputEventNormalizer.from_gesture(
+                            gesture='Custom Action',
                             confidence=confidence,
                         )
-                        pending_events.append((gesture_event, None, mode_manager.current_mode))
+                        pending_events.append((custom_event, custom_action, 'Custom Gesture'))
+                    elif gesture:
+                        if decision_engine.is_mode_switch(gesture) or should_execute:
+                            gesture_event = InputEventNormalizer.from_gesture(
+                                gesture=gesture,
+                                confidence=confidence,
+                            )
+                            pending_events.append((gesture_event, None, mode_manager.current_mode))
 
-                if voice_event is not None and voice_event.command != '__unmapped__' and voice_enabled_for_fusion:
-                    if (not voice_system_mode_only) or mode_manager.current_mode == 'System Mode':
-                        voice_command = voice_event.command
-                        voice_input = InputEventNormalizer.from_voice(
-                            command=voice_command,
-                            confidence=1.0,
-                            timestamp=voice_event.timestamp,
-                        )
-                        pending_events.append((voice_input, None, 'Voice'))
+                    if voice_event is not None and voice_event.command != '__unmapped__' and voice_enabled_for_fusion:
+                        if (not voice_system_mode_only) or mode_manager.current_mode == 'System Mode':
+                            voice_command = voice_event.command
+                            voice_input = InputEventNormalizer.from_voice(
+                                command=voice_command,
+                                confidence=1.0,
+                                timestamp=voice_event.timestamp,
+                            )
+                            pending_events.append((voice_input, None, 'Voice'))
 
                 for event, forced_action, source_label in pending_events:
                     if forced_action is not None:
@@ -793,6 +845,7 @@ class WorkerThread(QThread):
             state.set_system_active(False)
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline stopped')
             log_pipeline_state('Pipeline stopped')
+            log_lifecycle_event('pipeline', 'stopped', 'Worker loop exited cleanly')
 
         except Exception as exc:
             import traceback
@@ -817,3 +870,4 @@ class WorkerThread(QThread):
                     face_security_manager.close()
             except Exception:
                 pass
+            log_lifecycle_event('pipeline', 'error', str(exc))

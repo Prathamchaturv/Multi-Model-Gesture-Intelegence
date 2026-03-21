@@ -142,6 +142,34 @@ def log_security_check(allowed: bool, details: str) -> None:
     get_mmgi_logger().info('Security check: allowed=%s details=%s', allowed, details)
 
 
+def log_face_authorization_event(allowed: bool, status_text: str, similarity: float | None = None) -> None:
+    """Log explicit face authorization outcomes."""
+    if similarity is None:
+        get_mmgi_logger().info('Face auth: allowed=%s status=%s', allowed, status_text)
+    else:
+        get_mmgi_logger().info(
+            'Face auth: allowed=%s status=%s similarity=%.3f',
+            allowed,
+            status_text,
+            similarity,
+        )
+
+
+def log_voice_command_event(command: str, mapped: bool, details: str = '') -> None:
+    """Log recognized voice commands and mapping status."""
+    get_mmgi_logger().info(
+        'Voice command: command=%s mapped=%s details=%s',
+        command,
+        mapped,
+        details,
+    )
+
+
+def log_lifecycle_event(stage: str, status: str, details: str = '') -> None:
+    """Log lifecycle transitions such as start/stop/restart."""
+    get_mmgi_logger().info('Lifecycle: stage=%s status=%s details=%s', stage, status, details)
+
+
 def log_runtime_error(message: str) -> None:
     """Log runtime errors while keeping call sites concise."""
     get_mmgi_logger().error(message)

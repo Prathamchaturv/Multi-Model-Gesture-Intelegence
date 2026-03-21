@@ -526,7 +526,7 @@ class WorkerThread(QThread):
             last_invalid_log = 0.0
             uncertainty_streak = 0
             uncertainty_lock_until = 0.0
-            last_uncertainty_log = 0.0
+            uncertainty_lock_was_active = False
             last_face_auth_signature: tuple[bool, str] | None = None
             voice_backoff_until = 0.0
 
@@ -726,7 +726,7 @@ class WorkerThread(QThread):
                         hand_tracker.draw_landmarks(frame, detection_result)
                 else:
                     if gesture_processing_enabled:
-                        uncertainty_streak += 1
+                        # No-hand frames are expected and should not continuously trigger safety lock.
                         gesture, _ = gesture_filter.update(None, hand_present=False)
                         state.set_landmarks(None)
                         state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
@@ -761,12 +761,16 @@ class WorkerThread(QThread):
                     uncertainty_lock_until = max(uncertainty_lock_until, time.time() + 0.8)
                     uncertainty_streak = 0
 
-                if time.time() < uncertainty_lock_until:
-                    if time.time() - last_uncertainty_log > 1.0:
-                        last_uncertainty_log = time.time()
+                lock_active = time.time() < uncertainty_lock_until
+                if lock_active:
+                    if not uncertainty_lock_was_active:
                         state.emit_log(_ts(), 'SYSTEM', 'Safety lock: actions paused due to uncertain input')
                         log_runtime_error('Safety lock active due to uncertain gesture input')
+                    uncertainty_lock_was_active = True
                 else:
+                    if uncertainty_lock_was_active:
+                        state.emit_log(_ts(), 'SYSTEM', 'Safety lock cleared: stable input restored')
+                    uncertainty_lock_was_active = False
                     if custom_action and should_execute:
                         # Custom gestures bypass map lookup but still use unified execution path.
                         custom_event = InputEventNormalizer.from_gesture(

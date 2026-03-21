@@ -115,6 +115,7 @@ from PyQt6.QtWidgets import (
 
 from ui.shared_state  import SharedState
 from ui.worker_thread import WorkerThread
+from ui.pipeline_lifecycle import PipelineLifecycleManager
 from utils.config     import Config
 from core.calibration import CalibrationManager
 from core.adaptive_gesture_learning import (
@@ -1971,7 +1972,7 @@ class SettingsPanel(QWidget):
         self._build_ui()
         self._sync_ui_from_config()
 
-    def set_worker(self, worker: WorkerThread) -> None:
+    def set_worker(self, worker: WorkerThread | None) -> None:
         self._worker = worker
 
     def _build_ui(self) -> None:
@@ -2365,6 +2366,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._state  = SharedState(self)
         self._worker: WorkerThread | None = None
+        self._lifecycle = PipelineLifecycleManager(self)
         self._setup_window()
         self._build_ui()
         self._start_worker()
@@ -2480,18 +2482,77 @@ class MainWindow(QMainWindow):
         lay.addWidget(title)
         lay.addWidget(subtitle)
         lay.addStretch()
+
+        self._start_btn = QPushButton('Start')
+        self._start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._start_btn.setFixedHeight(26)
+        self._start_btn.setStyleSheet(
+            f'QPushButton {{ background: rgba(0,255,136,0.12); color: {ACTIVE}; border: 1px solid {ACTIVE}; '
+            f'border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: 700; }}'
+            f'QPushButton:hover {{ background: rgba(0,255,136,0.24); }}'
+        )
+        self._start_btn.clicked.connect(self._start_worker)
+
+        self._stop_btn = QPushButton('Stop')
+        self._stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._stop_btn.setFixedHeight(26)
+        self._stop_btn.setStyleSheet(
+            f'QPushButton {{ background: rgba(255,68,102,0.12); color: {INACTIVE}; border: 1px solid {INACTIVE}; '
+            f'border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: 700; }}'
+            f'QPushButton:hover {{ background: rgba(255,68,102,0.24); }}'
+        )
+        self._stop_btn.clicked.connect(self._stop_worker)
+
+        self._restart_btn = QPushButton('Restart')
+        self._restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._restart_btn.setFixedHeight(26)
+        self._restart_btn.setStyleSheet(
+            f'QPushButton {{ background: rgba(0,229,255,0.12); color: {ACCENT}; border: 1px solid {ACCENT}; '
+            f'border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: 700; }}'
+            f'QPushButton:hover {{ background: rgba(0,229,255,0.24); }}'
+        )
+        self._restart_btn.clicked.connect(self._restart_worker)
+
+        lay.addWidget(self._start_btn)
+        lay.addWidget(self._stop_btn)
+        lay.addWidget(self._restart_btn)
         lay.addWidget(self._header_mode)
         lay.addWidget(self._header_status)
 
         self._state.system_active_changed.connect(self._on_active_header)
         self._state.mode_changed.connect(self._on_mode_header)
+        self._lifecycle.state_changed.connect(self._on_lifecycle_state_changed)
         return header
 
     def _start_worker(self) -> None:
-        self._worker = WorkerThread(self._state, parent=self)
-        self._worker.frame_ready.connect(self._vision.update_frame)
-        self._worker.error.connect(self._on_worker_error)
-        self._worker.start()
+        def _factory() -> WorkerThread:
+            worker = WorkerThread(self._state, parent=self)
+            worker.frame_ready.connect(self._vision.update_frame)
+            worker.error.connect(self._on_worker_error)
+            return worker
+
+        if self._lifecycle.start(_factory):
+            self._worker = self._lifecycle.worker
+            self._settings_panel.set_worker(self._worker)
+
+    def _stop_worker(self) -> None:
+        stopped = self._lifecycle.stop(timeout_ms=3500)
+        if not stopped:
+            self._state.emit_log('--:--:--', 'ERROR', 'Pipeline stop timed out')
+        self._worker = self._lifecycle.worker
+        self._settings_panel.set_worker(self._worker)  # type: ignore[arg-type]
+
+    def _restart_worker(self) -> None:
+        def _factory() -> WorkerThread:
+            worker = WorkerThread(self._state, parent=self)
+            worker.frame_ready.connect(self._vision.update_frame)
+            worker.error.connect(self._on_worker_error)
+            return worker
+
+        ok = self._lifecycle.restart(_factory, timeout_ms=3500)
+        if not ok:
+            self._state.emit_log('--:--:--', 'ERROR', 'Pipeline restart failed')
+        self._worker = self._lifecycle.worker
         self._settings_panel.set_worker(self._worker)
 
     @pyqtSlot(bool)
@@ -2520,8 +2581,13 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, 'Pipeline Error',
                              f'The gesture pipeline encountered an error:\n\n{msg[:400]}')
 
+    @pyqtSlot(str)
+    def _on_lifecycle_state_changed(self, state: str) -> None:
+        self._state.emit_log('--:--:--', 'SYSTEM', f'Lifecycle state: {state}')
+        self._start_btn.setEnabled(state in {'STOPPED', 'ERROR'})
+        self._stop_btn.setEnabled(state in {'RUNNING', 'STARTING'})
+        self._restart_btn.setEnabled(state in {'RUNNING', 'ERROR', 'STOPPED'})
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.stop()
-            self._worker.wait(3000)
+        self._lifecycle.stop(timeout_ms=3500)
         event.accept()

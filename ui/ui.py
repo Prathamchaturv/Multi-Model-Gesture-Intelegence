@@ -28,46 +28,46 @@ from pathlib import Path
 # Colour tokens & global QSS  (was ui/styles.py)
 # ===========================================================================
 
-BG_DEEP   = '#0F0F14'
-BG_CARD   = '#1A1A22'
-BG_HOVER  = '#22222E'
-BORDER    = '#2A2A3A'
-ACCENT    = '#00E5FF'
-ACTIVE    = '#00FF88'
-INACTIVE  = '#FF4466'
-TEXT_PRI  = '#E8E8F0'
-TEXT_SEC  = '#8A8AA0'
-TEXT_HINT = '#505068'
+BG_DEEP   = '#090E1A'
+BG_CARD   = '#131C2E'
+BG_HOVER  = '#1A2740'
+BORDER    = '#243350'
+ACCENT    = '#22D3EE'
+ACTIVE    = '#34D399'
+INACTIVE  = '#FB7185'
+TEXT_PRI  = '#E6EEF9'
+TEXT_SEC  = '#A5B4CC'
+TEXT_HINT = '#6B7B96'
 
-MODE_APP    = '#00E5FF'
-MODE_MEDIA  = '#00BFFF'
-MODE_SYSTEM = '#8A7CFF'
+MODE_APP    = '#22D3EE'
+MODE_MEDIA  = '#60A5FA'
+MODE_SYSTEM = '#F59E0B'
 
 GLOBAL_QSS = f"""
 QMainWindow, QWidget {{
     background-color: {BG_DEEP};
     color: {TEXT_PRI};
-    font-family: "Segoe UI", "Inter", sans-serif;
+    font-family: "Outfit", "Poppins", "Segoe UI", sans-serif;
     font-size: 13px;
 }}
 QScrollBar:vertical {{
-    background: {BG_CARD}; width: 6px; margin: 0; border-radius: 3px;
+    background: {BG_CARD}; width: 8px; margin: 0; border-radius: 4px;
 }}
 QScrollBar::handle:vertical {{
-    background: {BORDER}; border-radius: 3px; min-height: 24px;
+    background: #36507C; border-radius: 4px; min-height: 24px;
 }}
 QScrollBar::handle:vertical:hover {{ background: {ACCENT}; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar:horizontal {{
-    background: {BG_CARD}; height: 6px; border-radius: 3px;
+    background: {BG_CARD}; height: 8px; border-radius: 4px;
 }}
 QScrollBar::handle:horizontal {{
-    background: {BORDER}; border-radius: 3px; min-width: 24px;
+    background: #36507C; border-radius: 4px; min-width: 24px;
 }}
 QScrollBar::handle:horizontal:hover {{ background: {ACCENT}; }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 QFrame#card {{
-    background-color: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 15px;
+    background-color: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 14px;
 }}
 QLabel#section_title {{ color: {ACCENT}; font-size: 11px; font-weight: 600; letter-spacing: 2px; }}
 QLabel#value_large   {{ color: {TEXT_PRI}; font-size: 28px; font-weight: 700; }}
@@ -84,7 +84,7 @@ QPushButton#nav_btn {{
     padding: 10px 16px; text-align: left; font-size: 13px;
 }}
 QPushButton#nav_btn:hover {{ background-color: {BG_HOVER}; color: {TEXT_PRI}; }}
-QPushButton#nav_btn[selected="true"] {{ background-color: rgba(0,229,255,0.12); color: {ACCENT}; font-weight: 600; }}
+QPushButton#nav_btn[selected="true"] {{ background-color: rgba(34,211,238,0.14); color: {ACCENT}; font-weight: 700; }}
 QProgressBar {{
     background-color: {BORDER}; border-radius: 4px; border: none; height: 6px; text-align: center; color: transparent;
 }}
@@ -93,7 +93,7 @@ QProgressBar#stability_bar::chunk {{
     background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {ACTIVE}, stop:1 {ACCENT});
 }}
 QToolTip {{
-    background-color: {BG_CARD}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+    background-color: {BG_CARD}; color: {TEXT_PRI}; border: 1px solid #35527D;
     border-radius: 6px; padding: 4px 8px;
 }}
 """
@@ -440,7 +440,7 @@ class Sidebar(QWidget):
     def _nav_btn_style(selected: bool = False) -> str:
         if selected:
             return (
-                f'QPushButton {{ background-color: rgba(0,229,255,0.12); color: {ACCENT}; font-weight: 600; '
+                f'QPushButton {{ background-color: rgba(34,211,238,0.14); color: {ACCENT}; font-weight: 700; '
                 f'border: none; border-radius: 10px; padding: 10px 16px; text-align: left; font-size: 13px; }}'
             )
         return (
@@ -2726,7 +2726,10 @@ class MainWindow(QMainWindow):
     def _build_header(self) -> QWidget:
         header = QWidget()
         header.setFixedHeight(52)
-        header.setStyleSheet(f'background-color: {BG_CARD}; border-bottom: 1px solid {BORDER};')
+        header.setStyleSheet(
+            f'background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, '
+            f'stop:0 #111A2B, stop:1 #1A2031); border-bottom: 1px solid {BORDER};'
+        )
         lay = QHBoxLayout(header)
         lay.setContentsMargins(20, 0, 20, 0)
         lay.setSpacing(12)
@@ -2736,7 +2739,7 @@ class MainWindow(QMainWindow):
         self._header_dot = dot
 
         title = QLabel('MMGI')
-        title.setStyleSheet(f'color: {ACCENT}; font-size: 15px; font-weight: 700; letter-spacing: 3px;')
+        title.setStyleSheet(f'color: {ACCENT}; font-size: 15px; font-weight: 800; letter-spacing: 4px;')
 
         subtitle = QLabel('Smart Mode AI Controller')
         subtitle.setStyleSheet(f'color: {TEXT_HINT}; font-size: 12px;')
@@ -2747,7 +2750,7 @@ class MainWindow(QMainWindow):
         self._header_mode = QLabel('APP MODE')
         self._header_mode.setStyleSheet(
             f'color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px; '
-            f'background: rgba(0,229,255,0.10); border: 1px solid {ACCENT}; border-radius: 10px; padding: 2px 10px;'
+            f'background: rgba(34,211,238,0.12); border: 1px solid {ACCENT}; border-radius: 10px; padding: 2px 10px;'
         )
 
         lay.addWidget(dot)
@@ -2779,9 +2782,9 @@ class MainWindow(QMainWindow):
         self._restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._restart_btn.setFixedHeight(26)
         self._restart_btn.setStyleSheet(
-            f'QPushButton {{ background: rgba(0,229,255,0.12); color: {ACCENT}; border: 1px solid {ACCENT}; '
+            f'QPushButton {{ background: rgba(34,211,238,0.12); color: {ACCENT}; border: 1px solid {ACCENT}; '
             f'border-radius: 8px; padding: 2px 10px; font-size: 11px; font-weight: 700; }}'
-            f'QPushButton:hover {{ background: rgba(0,229,255,0.24); }}'
+            f'QPushButton:hover {{ background: rgba(34,211,238,0.24); }}'
         )
         self._restart_btn.clicked.connect(self._restart_worker)
 

@@ -527,6 +527,7 @@ class WorkerThread(QThread):
             uncertainty_streak = 0
             uncertainty_lock_until = 0.0
             uncertainty_lock_was_active = False
+            last_safety_lock_log = 0.0
             last_face_auth_signature: tuple[bool, str] | None = None
             voice_backoff_until = 0.0
 
@@ -634,6 +635,10 @@ class WorkerThread(QThread):
                 elif mode_is_system and not face_security_enabled:
                     face_authorized = True
                     face_status = 'UNLOCKED | Face security disabled'
+                else:
+                    # Outside System Mode, face auth is informational only.
+                    face_authorized = False
+                    face_status = 'Face Auth: System Mode Only'
                 state.set_face_auth(face_authorized, face_status)
 
                 # ----------------------------------------------------------
@@ -764,12 +769,13 @@ class WorkerThread(QThread):
                 lock_active = time.time() < uncertainty_lock_until
                 if lock_active:
                     if not uncertainty_lock_was_active:
-                        state.emit_log(_ts(), 'SYSTEM', 'Safety lock: actions paused due to uncertain input')
+                        now = time.time()
+                        if now - last_safety_lock_log >= 6.0:
+                            state.emit_log(_ts(), 'SYSTEM', 'Safety lock: actions paused due to uncertain input')
+                            last_safety_lock_log = now
                         log_runtime_error('Safety lock active due to uncertain gesture input')
                     uncertainty_lock_was_active = True
                 else:
-                    if uncertainty_lock_was_active:
-                        state.emit_log(_ts(), 'SYSTEM', 'Safety lock cleared: stable input restored')
                     uncertainty_lock_was_active = False
                     if custom_action and should_execute:
                         # Custom gestures bypass map lookup but still use unified execution path.

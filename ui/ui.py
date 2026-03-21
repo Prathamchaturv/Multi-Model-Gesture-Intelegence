@@ -740,7 +740,8 @@ class VisionPanel(QWidget):
         full = status_text if status_text else 'Face Auth: Idle'
         self._face_auth_val.setText(self._compact_text(full, 28))
         self._face_auth_val.setToolTip(full)
-        colour = ACTIVE if authorized else INACTIVE
+        neutral = 'system mode only' in full.lower()
+        colour = TEXT_SEC if neutral else (ACTIVE if authorized else INACTIVE)
         self._face_auth_val.setStyleSheet(
             f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
         )
@@ -938,8 +939,10 @@ class SystemCard(QFrame):
 
     @pyqtSlot(bool, str)
     def _on_face_auth(self, authorized: bool, status_text: str) -> None:
-        colour = ACTIVE if authorized else INACTIVE
-        self._auth_lbl.setText(status_text if status_text else 'Face Auth: Idle (System Mode Only)')
+        text = status_text if status_text else 'Face Auth: Idle (System Mode Only)'
+        neutral = 'system mode only' in text.lower()
+        colour = TEXT_HINT if neutral else (ACTIVE if authorized else INACTIVE)
+        self._auth_lbl.setText(text)
         self._auth_lbl.setStyleSheet(
             f'color: {colour}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
         )
@@ -2622,8 +2625,8 @@ class SystemPanel(QWidget):
         self._build(state)
 
     def _build(self, state: SharedState) -> None:
-        self.setMinimumWidth(300)
-        self.setMaximumWidth(430)
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(390)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.setStyleSheet(f'background-color: {BG_DEEP};')
 
@@ -2948,11 +2951,11 @@ class MainWindow(QMainWindow):
             self._activity.set_dock_height(dock_h)
 
         if hasattr(self, '_main_splitter'):
-            right = 340
+            right = 310
             if width >= 1500:
-                right = 390
+                right = 340
             elif width <= 1260:
-                right = 320
+                right = 290
             total = max(800, width - 260)
             left = max(520, total - right)
             self._main_splitter.setSizes([left, right])

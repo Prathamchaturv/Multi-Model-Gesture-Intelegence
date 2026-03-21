@@ -148,32 +148,22 @@ gesture is interpreted.
 | 👍 Thumbs Up | Volume Up |
 | 🤙 Pinky | Volume Down |
 
-Media Mode now supports **multi-modal fusion (Gesture + Voice)** for selected actions.
+Media Mode now runs inside the **unified multimodal event pipeline**.
 
-- Voice input is captured continuously using a lightweight speech recognition listener.
-- For configured actions (default: `play_pause`, `mute`), execution requires both:
-  - Matching gesture
-  - Matching voice command within a short time window
-- Partial input is ignored (gesture-only or voice-only does not execute).
-
-Example fusion:
-- Gesture: Four Fingers + Voice: "play song" -> Play / Pause action executes
+- Gesture and voice commands are both normalized into a shared `InputEvent` payload.
+- Both channels are resolved by the same `DecisionEngine` using mode-aware maps.
+- A per-mode action whitelist is enforced before execution.
+- Near-simultaneous duplicate triggers are deduplicated (voice can be prioritized).
 
 ### 3.5 System Mode 
 
-- Index fingertip (landmark 8) continuously maps to screen coordinates via a configurable edge-margin transform
-- **Pinch click**: thumb tip + index tip proximity triggers a left-click on rising edge
-- **EMA smoothing** (`α = 0.25`) applied to raw landmark coordinates to remove per-frame jitter
-- **Dead-zone filter** (4 px default) suppresses cursor drift when the hand is stationary
-- **Rising-edge detection** on pinch/click gestures — fires once per onset, not on hold,
-  with a 0.5 s inter-click cooldown
-- Implemented via Win32 `ctypes` (`mouse_event`, `SetCursorPos`) — no external mouse library
+- System gestures and System voice commands are both resolved through the same decision path.
+- Typical system actions include left click, right click, double click, window control, and media keys.
 - **Face-Based Security gate (System Mode only)**:
-  - Face is detected in real time from webcam feed
+  - Face is checked immediately before executing every System Mode action
   - Current face is compared with a stored authorized user face encoding
-  - Match -> `User Recognized` and System Mode remains available
-  - Unknown / no-face -> `Unknown User` and System Mode is locked
-  - Unauthorized face status overrides gesture activation in System Mode
+  - Authorized -> action executes
+  - Unauthorized / no-face -> action is blocked and logged with reason
 - **Smart Presence Detection (System Mode only)**:
   - Presence monitor tracks whether any face remains visible
   - If no face is seen for a delay window, MMGI pauses System Mode
@@ -256,49 +246,26 @@ Example fusion:
 ### Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        WorkerThread (QThread)                           │
-│                                                                         │
-│  ┌───────────┐    ┌──────────────────┐    ┌──────────────────────────┐ │
-│  │  Camera   │───▶│  HandTracker     │───▶│  GestureClassifier       │ │
-│  │ (OpenCV)  │    │  (MediaPipe)     │    │  (rule-based)            │ │
-│  └───────────┘    └──────────────────┘    └──────────────────────────┘ │
-│   raw BGR frame    21 3-D landmarks         gesture name string         │
-│                    finger states                     │                  │
-│                                                      ▼                  │
-│                                          ┌───────────────────────┐     │
-│                                          │    DecisionEngine     │     │
-│                                          │  · mode state machine │     │
-│                                          │  · stability gate     │     │
-│                                          │  · action lookup      │     │
-│                                          └───────────────────────┘     │
-│                                                      │                  │
-│                              │                                         │
-│                              ▼                                         │
-│                   ┌──────────────────┐                                 │
-│                   │ActivationManager │                                 │
-│                   │ (safety gate)    │                                 │
-│                   └──────────────────┘                                 │
-│                              │                                         │
-│                              ▼                                         │
-│                       ActionExecutor                                   │
-│                       (pyautogui)                                      │
-│                                                                         │
-│  SharedState.set_*() ─────────────────────────────────▶ UI panels      │
-│  frame_ready.emit(QImage) ────────────────────────▶ VisionPanel        │
-└─────────────────────────────────────────────────────────────────────────┘
+Input (Gesture / Voice)
+  -> Input Event Normalizer
+  -> DecisionEngine (mode-aware mappings + per-mode whitelist)
+  -> Security Layer (FaceSecurityManager for System Mode)
+  -> ModeManager (APP / MEDIA / SYSTEM + switch cooldown)
+  -> ActionExecutor
 ```
 
 ### Data Flow
 
 ```
-Camera frame (BGR)
-  └─▶ HandTracker           → NormalizedLandmarkList (21 points) + confidence
-    └─▶ GestureClassifier → gesture name string  (e.g. "Three Fingers")
-      └─▶ DecisionEngine → action key string  OR  mode switch event
-        ├─▶ ActivationManager  → ACTIVE / INACTIVE state
-        ├─▶ ActionExecutor     → pyautogui.hotkey(...)
-        └─▶ SharedState        → pyqtSignals → UI panels (real-time)
+Gesture frame stream and voice stream are both normalized to `InputEvent`.
+
+Each event passes through one centralized path:
+
+1. DecisionEngine resolves mode switch or action.
+2. ModeManager commits switch events with cooldown protection.
+3. Security layer authorizes System Mode actions using face verification.
+4. ActionExecutor performs the final OS action.
+5. SharedState/UI receives telemetry and logs.
 ```
 
 ### Layer Responsibilities
@@ -308,7 +275,10 @@ Camera frame (BGR)
 | Input | `core/camera.py` | OpenCV `VideoCapture`, delivers raw BGR frames |
 | Perception | `core/hand_tracking.py` | MediaPipe HandLandmarker wrapper, 21-landmark struct |
 | Classification | `core/gesture_classifier.py` | Finger-state vector → gesture name string |
-| Decision | `engine/decision_engine.py` | Mode state machine, gesture→action lookup, stability tracking |
+| Input Event | `engine/unified_pipeline.py` | `InputEvent` schema, event normalization, conflict handling |
+| Decision | `engine/decision_engine.py` | Unified gesture/voice resolution, mode maps, per-mode whitelist |
+| Mode | `engine/unified_pipeline.py` | `ModeManager` state and cooldown-protected mode switching |
+| Security | `core/face_security.py` | Face authorization checks for System Mode actions |
 | Safety | `engine/activation_manager.py` | Open Palm hold-to-activate, Fist-to-deactivate gate |
 | Execution | `engine/action_executor.py` | `pyautogui` keyboard and media key dispatch |
 | System Voice | `core/voice_control.py` | Speech recognition, normalization, and command token emission |

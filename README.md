@@ -450,6 +450,22 @@ Live voice status hints in dashboard:
 - `Heard: ...`: speech was recognized but not mapped to an action token.
 - `Voice Error: ...`: microphone/API/backend issue requiring configuration or permission fix.
 
+### Calibration Setup (Phase 2)
+
+MMGI now supports runtime calibration from the **Settings -> Calibration** panel.
+
+Available controls:
+- `Gesture Hold Time` slider (0.5 s to 2.5 s)
+- `Stability Frames` slider
+- `Base Cursor Sensitivity` slider (distance-aware adjustment)
+- `Debug Overlay` toggle for live diagnostics on camera feed
+
+Calibration wizard:
+1. Click `Start Calibration Wizard`.
+2. Follow each prompt (neutral distance -> near -> far -> confirm).
+3. Click through steps; values are saved to `config/calibration.json`.
+4. Worker hot-reloads calibration without requiring app restart.
+
 ### Quick Usage Checklist
 
 1. Ensure webcam access is available to Python.
@@ -536,6 +552,7 @@ python -m pytest tests/test_mode_switching.py -v
 | `test_gesture_classifier.py` | `GestureClassifier` | 14 | All 10 named gestures, edge cases, Unknown fallback |
 | `test_mode_switching.py` | `DecisionEngine` | 31 | Mode transitions, stability gate, cooldown, debounce, hot-reload, action lookup |
 | `test_action_executor.py` | `ActionExecutor` | 16 | Label completeness, action dispatch, cooldown behavior, feedback, edge cases |
+| `test_calibration_metrics.py` | `CalibrationManager`, `MetricsManager` | 5 | Calibration load/save, sensitivity scaling, wizard flow, metrics snapshots and report flushing |
 | `test_logging.py` | `utils.logger` | 1 | Runtime log file creation and write path validation |
 
 ---
@@ -580,6 +597,22 @@ Event categories recorded:
 | `INFO` | Gesture detected, action executed, pipeline start/stop |
 | `WARNING` | Low confidence gesture |
 | `ERROR` | No hand detected, invalid gesture, pipeline execution errors |
+
+### Phase 2 Metrics Report
+
+MMGI now tracks lightweight runtime metrics in `logs/metrics_report.jsonl`.
+
+Tracked fields:
+- `gesture_accuracy_pct` (confirmed gestures / total gesture events)
+- `false_activation_rate_pct` (blocked or failed activations / attempts)
+- `avg_response_latency_ms`
+- `mode_switches_per_min`
+
+Sample report line:
+
+```json
+{"timestamp":"2026-03-22T19:32:41","gesture_accuracy_pct":87.5,"false_activation_rate_pct":8.33,"avg_response_latency_ms":41.2,"mode_switches_per_min":3.0}
+```
 
 ---
 

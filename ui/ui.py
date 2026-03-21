@@ -110,12 +110,13 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QProgressBar, QScrollArea,
     QSizePolicy, QSpacerItem, QMainWindow, QMessageBox,
     QComboBox, QStackedWidget, QLineEdit, QListWidget, QListWidgetItem,
-    QCheckBox,
+    QCheckBox, QSlider,
 )
 
 from ui.shared_state  import SharedState
 from ui.worker_thread import WorkerThread
 from utils.config     import Config
+from core.calibration import CalibrationManager
 from core.adaptive_gesture_learning import (
     CustomGestureStore,
     GestureRecorder,
@@ -981,6 +982,8 @@ class PerformanceCard(QFrame):
         state.latency_changed.connect(self._on_latency)
         state.volume_changed.connect(self._on_volume)
         state.confidence_changed.connect(self._on_confidence)
+        state.cursor_sensitivity_changed.connect(self._on_cursor_sensitivity)
+        state.metrics_changed.connect(self._on_metrics)
 
     def _build(self) -> None:
         self.setObjectName('card')
@@ -1070,6 +1073,17 @@ class PerformanceCard(QFrame):
         """)
         lay.addWidget(self._conf_bar)
 
+        lay.addWidget(_divider())
+
+        self._cursor_lbl = QLabel('Cursor Sensitivity: 1.00x')
+        self._cursor_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        lay.addWidget(self._cursor_lbl)
+
+        self._metrics_lbl = QLabel('Acc: 0.0%   False Activations: 0.0%   Mode/min: 0')
+        self._metrics_lbl.setWordWrap(True)
+        self._metrics_lbl.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px; background: transparent; border: none;')
+        lay.addWidget(self._metrics_lbl)
+
     @pyqtSlot(float)
     def _on_fps(self, fps: float) -> None:
         self._fps_val.setText(f'{fps:.0f}')
@@ -1088,6 +1102,19 @@ class PerformanceCard(QFrame):
         pct = int(conf * 100)
         self._conf_pct.setText(f'{pct} %')
         self._conf_bar.setValue(pct)
+
+    @pyqtSlot(float)
+    def _on_cursor_sensitivity(self, value: float) -> None:
+        self._cursor_lbl.setText(f'Cursor Sensitivity: {value:.2f}x')
+
+    @pyqtSlot(dict)
+    def _on_metrics(self, payload: dict) -> None:
+        acc = float(payload.get('gesture_accuracy_pct', 0.0))
+        false_rate = float(payload.get('false_activation_rate_pct', 0.0))
+        mode_rate = float(payload.get('mode_switches_per_min', 0.0))
+        self._metrics_lbl.setText(
+            f'Acc: {acc:.1f}%   False Activations: {false_rate:.1f}%   Mode/min: {mode_rate:.0f}'
+        )
 
 
 # ===========================================================================
@@ -1939,6 +1966,8 @@ class SettingsPanel(QWidget):
         self._state = state
         self._worker: WorkerThread | None = None
         self._cfg = _load_face_security_config()
+        self._calibration = CalibrationManager()
+        self._wizard_active = False
         self._build_ui()
         self._sync_ui_from_config()
 
@@ -2009,13 +2038,168 @@ class SettingsPanel(QWidget):
         lay.addWidget(self._status_lbl)
 
         root.addWidget(card)
+
+        calib_card = QFrame()
+        calib_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        calib_lay = QVBoxLayout(calib_card)
+        calib_lay.setContentsMargins(16, 14, 16, 16)
+        calib_lay.setSpacing(10)
+
+        calib_title = QLabel('CALIBRATION')
+        calib_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        calib_lay.addWidget(calib_title)
+        calib_lay.addWidget(_divider())
+
+        self._hold_slider, self._hold_value = self._slider_row(
+            'Gesture Hold Time',
+            min_value=5,
+            max_value=25,
+            suffix='s',
+            value_scale=10.0,
+        )
+        calib_lay.addLayout(self._hold_slider)
+
+        self._stable_slider, self._stable_value = self._slider_row(
+            'Stability Frames',
+            min_value=2,
+            max_value=20,
+            suffix='f',
+            value_scale=1.0,
+        )
+        calib_lay.addLayout(self._stable_slider)
+
+        self._sensitivity_slider, self._sensitivity_value = self._slider_row(
+            'Base Cursor Sensitivity',
+            min_value=5,
+            max_value=25,
+            suffix='x',
+            value_scale=10.0,
+        )
+        calib_lay.addLayout(self._sensitivity_slider)
+
+        self._debug_overlay_toggle = QCheckBox('Enable debug overlay on camera feed')
+        self._debug_overlay_toggle.setStyleSheet(f"""
+            QCheckBox {{ color: {TEXT_PRI}; font-size: 12px; background: transparent; }}
+            QCheckBox::indicator {{ width: 14px; height: 14px; }}
+            QCheckBox::indicator:unchecked {{ border: 1px solid {BORDER}; background: {BG_HOVER}; border-radius: 3px; }}
+            QCheckBox::indicator:checked {{ border: 1px solid {ACTIVE}; background: {ACTIVE}; border-radius: 3px; }}
+        """)
+        calib_lay.addWidget(self._debug_overlay_toggle)
+
+        btn_row = QHBoxLayout()
+        self._apply_calib_btn = QPushButton('Apply Calibration')
+        self._apply_calib_btn.setFixedHeight(34)
+        self._apply_calib_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._apply_calib_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0,255,136,0.12); color: {ACTIVE}; border: 1px solid {ACTIVE};
+                border-radius: 8px; font-size: 12px; font-weight: 700;
+            }}
+            QPushButton:hover {{ background: rgba(0,255,136,0.24); }}
+        """)
+        self._apply_calib_btn.clicked.connect(self._on_apply_calibration)
+
+        self._wizard_btn = QPushButton('Start Calibration Wizard')
+        self._wizard_btn.setFixedHeight(34)
+        self._wizard_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._wizard_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0,229,255,0.12); color: {ACCENT}; border: 1px solid {ACCENT};
+                border-radius: 8px; font-size: 12px; font-weight: 700;
+            }}
+            QPushButton:hover {{ background: rgba(0,229,255,0.24); }}
+        """)
+        self._wizard_btn.clicked.connect(self._on_wizard_step)
+
+        btn_row.addWidget(self._apply_calib_btn)
+        btn_row.addWidget(self._wizard_btn)
+        calib_lay.addLayout(btn_row)
+
+        self._calib_status_lbl = QLabel('Adjust values and click Apply Calibration.')
+        self._calib_status_lbl.setWordWrap(True)
+        self._calib_status_lbl.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px; background: transparent; border: none;')
+        calib_lay.addWidget(self._calib_status_lbl)
+
+        root.addWidget(calib_card)
         root.addStretch()
+
+    def _slider_row(
+        self,
+        title: str,
+        min_value: int,
+        max_value: int,
+        suffix: str,
+        value_scale: float,
+    ) -> tuple[QVBoxLayout, QLabel]:
+        block = QVBoxLayout()
+        block.setSpacing(4)
+
+        row = QHBoxLayout()
+        lbl = QLabel(title)
+        lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        val = QLabel('')
+        val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        val.setStyleSheet(f'color: {TEXT_PRI}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
+        row.addWidget(lbl)
+        row.addStretch()
+        row.addWidget(val)
+        block.addLayout(row)
+
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(min_value, max_value)
+        slider.setSingleStep(1)
+        slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{ background: {BORDER}; height: 5px; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {ACCENT}; width: 14px; margin: -5px 0; border-radius: 7px; }}
+        """)
+
+        def _refresh_label(raw: int) -> None:
+            value = raw / value_scale
+            if value_scale == 1.0:
+                val.setText(f'{int(value)} {suffix}')
+            else:
+                val.setText(f'{value:.1f} {suffix}')
+
+        slider.valueChanged.connect(_refresh_label)
+        block.addWidget(slider)
+
+        if title.startswith('Gesture Hold'):
+            self._hold_time_slider = slider
+        elif title.startswith('Stability'):
+            self._stability_frames_slider = slider
+        else:
+            self._base_sensitivity_slider = slider
+
+        return block, val
 
     def _sync_ui_from_config(self) -> None:
         self._cfg = _load_face_security_config()
+        self._calibration.load()
         self._face_toggle.blockSignals(True)
         self._face_toggle.setChecked(bool(self._cfg.get('enabled', True)))
         self._face_toggle.blockSignals(False)
+
+        profile = self._calibration.profile
+        self._hold_time_slider.blockSignals(True)
+        self._stability_frames_slider.blockSignals(True)
+        self._base_sensitivity_slider.blockSignals(True)
+
+        self._hold_time_slider.setValue(int(round(profile.gesture_hold_seconds * 10.0)))
+        self._stability_frames_slider.setValue(int(profile.stability_frames))
+        self._base_sensitivity_slider.setValue(int(round(profile.base_cursor_sensitivity * 10.0)))
+        self._debug_overlay_toggle.setChecked(bool(profile.debug_overlay_enabled))
+
+        self._hold_time_slider.blockSignals(False)
+        self._stability_frames_slider.blockSignals(False)
+        self._base_sensitivity_slider.blockSignals(False)
+
+        self._hold_value.setText(f'{profile.gesture_hold_seconds:.1f} s')
+        self._stable_value.setText(f'{int(profile.stability_frames)} f')
+        self._sensitivity_value.setText(f'{profile.base_cursor_sensitivity:.1f} x')
 
     def _on_toggle_face_security(self, _state: int) -> None:
         self._cfg['enabled'] = self._face_toggle.isChecked()
@@ -2070,6 +2254,53 @@ class SettingsPanel(QWidget):
             self._status_lbl.setStyleSheet(
                 f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
             )
+
+    def _on_apply_calibration(self) -> None:
+        hold_seconds = self._hold_time_slider.value() / 10.0
+        stability_frames = int(self._stability_frames_slider.value())
+        base_sensitivity = self._base_sensitivity_slider.value() / 10.0
+        debug_enabled = self._debug_overlay_toggle.isChecked()
+
+        self._calibration.update(
+            gesture_hold_seconds=hold_seconds,
+            mode_switch_hold_seconds=hold_seconds,
+            stability_frames=stability_frames,
+            base_cursor_sensitivity=base_sensitivity,
+            debug_overlay_enabled=debug_enabled,
+        )
+        self._calibration.save()
+
+        if self._worker is not None:
+            self._worker.reload_calibration()
+
+        self._calib_status_lbl.setText(
+            f'Calibration applied: hold={hold_seconds:.1f}s, stability={stability_frames}, sensitivity={base_sensitivity:.1f}x'
+        )
+        self._calib_status_lbl.setStyleSheet(
+            f'color: {ACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+        )
+
+    def _on_wizard_step(self) -> None:
+        landmarks = getattr(self._state, '_latest_landmarks', None)
+        sample = CalibrationManager.estimate_hand_distance(landmarks)
+
+        if not self._wizard_active:
+            message = self._calibration.start_wizard()
+            self._wizard_active = True
+            self._wizard_btn.setText('Wizard: Next Step')
+        else:
+            message = self._calibration.wizard_record_sample(sample)
+            if 'complete' in message.lower():
+                self._wizard_active = False
+                self._wizard_btn.setText('Start Calibration Wizard')
+                self._sync_ui_from_config()
+                if self._worker is not None:
+                    self._worker.reload_calibration()
+
+        self._calib_status_lbl.setText(message)
+        self._calib_status_lbl.setStyleSheet(
+            f'color: {ACCENT}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+        )
 
     def refresh(self) -> None:
         self._sync_ui_from_config()

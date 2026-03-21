@@ -165,7 +165,7 @@ class UnifiedDecisionPipeline:
         self._face_security = face_security
         self._conflict_resolver = conflict_resolver or InputConflictResolver()
 
-    def process_event(self, event: InputEvent, frame_bgr=None) -> PipelineDecision:
+    def process_event(self, event: InputEvent, frame_bgr=None, enforce_face_security: bool = True) -> PipelineDecision:
         """Resolve, authorize, and execute exactly one normalized input event."""
         log_input_received(event.type, event.command, event.confidence)
 
@@ -206,7 +206,7 @@ class UnifiedDecisionPipeline:
                 blocked_reason='conflict_duplicate_ignored',
             )
 
-        if self._mode_manager.current_mode == 'System Mode' and self._face_security is not None:
+        if enforce_face_security and self._mode_manager.current_mode == 'System Mode' and self._face_security is not None:
             auth_result = self._face_security.evaluate(frame_bgr)
             log_security_check(auth_result.is_authorized, auth_result.status_text)
             if not auth_result.is_authorized:

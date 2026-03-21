@@ -2,10 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import json
 from pathlib import Path
 from typing import Iterable
+
+
+@dataclass
+class GestureThreshold:
+    """Calibration threshold values for a specific gesture."""
+
+    min_confidence: float = 0.5
+    required_stability_frames: int = 4
+    required_hold_seconds: float = 1.0
 
 
 @dataclass
@@ -22,6 +31,13 @@ class CalibrationProfile:
     mode_switch_hold_seconds: float = 1.0
     mode_switch_cooldown_seconds: float = 2.0
     debug_overlay_enabled: bool = False
+    gesture_thresholds: dict[str, GestureThreshold] = field(
+        default_factory=lambda: {
+            'Open Palm': GestureThreshold(min_confidence=0.55, required_stability_frames=4, required_hold_seconds=0.8),
+            'Pinch': GestureThreshold(min_confidence=0.5, required_stability_frames=5, required_hold_seconds=0.7),
+            'Three Fingers Hold': GestureThreshold(min_confidence=0.6, required_stability_frames=6, required_hold_seconds=1.0),
+        }
+    )
 
 
 class CalibrationManager:
@@ -58,15 +74,27 @@ class CalibrationManager:
             with open(self._config_path, 'r', encoding='utf-8') as fh:
                 raw = json.load(fh)
             if isinstance(raw, dict):
-                self._profile = CalibrationProfile(**{**asdict(self._profile), **raw})
+                merged = {**asdict(self._profile), **raw}
+                thresholds = raw.get('gesture_thresholds', {}) if isinstance(raw.get('gesture_thresholds', {}), dict) else {}
+                merged_thresholds: dict[str, GestureThreshold] = {}
+                for name, defaults in self._profile.gesture_thresholds.items():
+                    incoming = thresholds.get(name, {}) if isinstance(thresholds.get(name, {}), dict) else {}
+                    merged_thresholds[name] = GestureThreshold(
+                        min_confidence=float(incoming.get('min_confidence', defaults.min_confidence)),
+                        required_stability_frames=int(incoming.get('required_stability_frames', defaults.required_stability_frames)),
+                        required_hold_seconds=float(incoming.get('required_hold_seconds', defaults.required_hold_seconds)),
+                    )
+                merged['gesture_thresholds'] = merged_thresholds
+                self._profile = CalibrationProfile(**merged)
         except Exception:
             pass
         return self._profile
 
     def save(self) -> None:
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = asdict(self._profile)
         with open(self._config_path, 'w', encoding='utf-8') as fh:
-            json.dump(asdict(self._profile), fh, indent=2)
+            json.dump(payload, fh, indent=2)
 
     def update(self, **values) -> CalibrationProfile:
         current = asdict(self._profile)
@@ -80,8 +108,35 @@ class CalibrationManager:
         current['stability_frames'] = int(max(2, min(30, current['stability_frames'])))
         current['near_hand_distance'] = float(max(0.05, min(0.5, current['near_hand_distance'])))
         current['far_hand_distance'] = float(max(0.03, min(current['near_hand_distance'] - 0.01, current['far_hand_distance'])))
+        thresholds = current.get('gesture_thresholds', {})
+        if isinstance(thresholds, dict):
+            normalized: dict[str, GestureThreshold] = {}
+            for name, default in self._profile.gesture_thresholds.items():
+                value = thresholds.get(name, default)
+                if isinstance(value, GestureThreshold):
+                    normalized[name] = value
+                    continue
+                if isinstance(value, dict):
+                    normalized[name] = GestureThreshold(
+                        min_confidence=float(max(0.1, min(1.0, value.get('min_confidence', default.min_confidence)))),
+                        required_stability_frames=int(max(2, min(30, value.get('required_stability_frames', default.required_stability_frames)))),
+                        required_hold_seconds=float(max(0.2, min(4.0, value.get('required_hold_seconds', default.required_hold_seconds)))),
+                    )
+                else:
+                    normalized[name] = default
+            current['gesture_thresholds'] = normalized
         self._profile = CalibrationProfile(**current)
         return self._profile
+
+    def update_gesture_threshold(self, gesture_name: str, **values) -> GestureThreshold:
+        threshold = self._profile.gesture_thresholds.get(gesture_name, GestureThreshold())
+        updated = GestureThreshold(
+            min_confidence=float(max(0.1, min(1.0, values.get('min_confidence', threshold.min_confidence)))),
+            required_stability_frames=int(max(2, min(30, values.get('required_stability_frames', threshold.required_stability_frames)))),
+            required_hold_seconds=float(max(0.2, min(4.0, values.get('required_hold_seconds', threshold.required_hold_seconds)))),
+        )
+        self._profile.gesture_thresholds[gesture_name] = updated
+        return updated
 
     @staticmethod
     def estimate_hand_distance(landmarks: Iterable[tuple[float, float, float]] | None) -> float | None:
@@ -111,6 +166,21 @@ class CalibrationManager:
         ratio = max(0.0, min(1.0, ratio))
         dynamic = profile.min_cursor_sensitivity + ratio * (profile.max_cursor_sensitivity - profile.min_cursor_sensitivity)
         return float(max(profile.min_cursor_sensitivity, min(profile.max_cursor_sensitivity, dynamic)))
+
+    @staticmethod
+    def is_pinch_detected(landmarks: Iterable[tuple[float, float, float]] | None, threshold: float = 0.045) -> bool:
+        if not landmarks:
+            return False
+        points = list(landmarks)
+        if len(points) <= 8:
+            return False
+        thumb_tip = points[4]
+        index_tip = points[8]
+        dx = float(thumb_tip[0]) - float(index_tip[0])
+        dy = float(thumb_tip[1]) - float(index_tip[1])
+        dz = float(thumb_tip[2]) - float(index_tip[2])
+        dist = (dx * dx + dy * dy + dz * dz) ** 0.5
+        return dist <= float(max(0.01, min(0.12, threshold)))
 
     def start_wizard(self) -> str:
         self._wizard_index = 0

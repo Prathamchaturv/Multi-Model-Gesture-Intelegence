@@ -168,7 +168,20 @@ Files:
 - Current gesture + final action display
 - Face authorization status text and color
 - Voice/mic status indicator
+- Activation lock status with explicit lock reason (face/security/gesture stability)
 - Optional debug overlay on camera feed
+
+### Runtime Controls (Settings)
+- Toggle face security on/off at runtime
+- Toggle voice listener on/off at runtime
+- Toggle gesture control on/off at runtime
+- Manual mode selector (App / Media / System) for forced mode changes
+
+### Calibration Verification UX
+- Live camera preview in Settings (same annotated feed as Vision panel)
+- Per-gesture verification flow: Open Palm, Pinch, Three Fingers Hold
+- Test Gesture action with pass/fail feedback using confidence + stability checks
+- Live verification telemetry: confidence, hand distance estimate, gesture status
 
 ### State Tracking
 - SharedState broadcasts live pipeline values

@@ -425,6 +425,7 @@ class WorkerThread(QThread):
             voice_enabled_for_fusion = voice_listener.is_enabled
             voice_system_mode_only = bool(voice_cfg.get('system_mode_only', True))
             voice_listener.start()
+            state.set_voice_listener_enabled(voice_enabled_for_fusion)
             state.set_voice_command('Listening...' if voice_enabled_for_fusion else 'Voice Unavailable')
             last_voice_error: str | None = None
 
@@ -500,6 +501,9 @@ class WorkerThread(QThread):
                 away_delay_s=float(face_security_cfg.get('away_delay_s', 2.5)),
                 return_confirm_s=float(face_security_cfg.get('return_confirm_s', 0.7)),
             )
+            state.set_face_security_enabled(bool(face_security_cfg.get('enabled', True)))
+            state.set_gesture_control_enabled(True)
+            state.request_mode(mode_manager.current_mode)
 
             action_executor = ActionExecutor(config={
                 'brave_path':        config.get('apps.brave_path'),
@@ -533,6 +537,7 @@ class WorkerThread(QThread):
             log_pipeline_state('Pipeline started')
             log_lifecycle_event('pipeline', 'started', 'Worker loop active')
             state.set_face_auth(True, 'Face Security: Login Only')
+            state.set_activation_lock(True, 'Waiting for stable gesture')
 
             # ----------------------------------------------------------------
             # Frame loop
@@ -569,8 +574,18 @@ class WorkerThread(QThread):
                     gesture_filter.set_confirm_frames(profile.stability_frames)
                     state.emit_log(_ts(), 'SYSTEM', 'Calibration reloaded from settings')
 
+                if state.requested_mode != mode_manager.current_mode:
+                    mode_manager.set_mode(state.requested_mode)
+                    decision_engine.current_mode = mode_manager.current_mode
+                    state.set_mode(mode_manager.current_mode)
+                    state.emit_log(_ts(), 'MODE', f'Switched to {mode_manager.current_mode} (manual)')
+
+                voice_enabled_for_fusion = bool(state.voice_listener_enabled) and voice_listener is not None and voice_listener.is_enabled
+                gesture_processing_enabled = bool(state.gesture_control_enabled)
+                face_security_enabled = bool(state.face_security_enabled)
+
                 voice_event = None
-                if voice_listener is not None:
+                if voice_listener is not None and voice_enabled_for_fusion:
                     voice_event = voice_listener.poll_latest()
                     if voice_event is not None:
                         if time.time() < voice_backoff_until:
@@ -597,11 +612,13 @@ class WorkerThread(QThread):
                         state.emit_log(_ts(), 'SYSTEM', f'Voice listener error: {last_voice_error}')
                     elif voice_listener.is_enabled and voice_listener.is_ready and state.voice_command == 'Listening...':
                         state.set_voice_command('Mic Active - Speak Command')
+                elif not state.voice_listener_enabled:
+                    state.set_voice_command('Voice Control Off')
 
                 face_authorized = True
                 face_status = face_security_manager.setup_status_text
                 mode_is_system = mode_manager.current_mode == 'System Mode'
-                if mode_is_system:
+                if mode_is_system and face_security_enabled:
                     face_result = face_security_manager.evaluate(frame)
                     face_authorized = face_result.is_authorized
                     prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
@@ -614,12 +631,15 @@ class WorkerThread(QThread):
                             face_result.status_text,
                             face_result.similarity,
                         )
+                elif mode_is_system and not face_security_enabled:
+                    face_authorized = True
+                    face_status = 'UNLOCKED | Face security disabled'
                 state.set_face_auth(face_authorized, face_status)
 
                 # ----------------------------------------------------------
                 # Hand detection + gesture classification
                 # ----------------------------------------------------------
-                skip_hand_processing = False
+                skip_hand_processing = not gesture_processing_enabled
                 detection_result = None
                 hands_info = {}
                 if not skip_hand_processing:
@@ -629,6 +649,7 @@ class WorkerThread(QThread):
                 gesture: str | None = None
                 confidence          = 0.0
                 ui_gesture_text = 'Gesture unclear'
+                gesture_verification_status = 'Not Detected'
                 custom_match = None
                 custom_action: str | None = None
 
@@ -645,6 +666,7 @@ class WorkerThread(QThread):
                         uncertainty_streak += 1
                         gesture, _ = gesture_filter.update(None, hand_present=True)
                         ui_gesture_text = 'Gesture unclear'
+                        gesture_verification_status = 'Unstable'
                         last_logged_gesture = None
                         now = time.time()
                         if now - last_low_conf_log >= warning_interval:
@@ -673,6 +695,7 @@ class WorkerThread(QThread):
                                 uncertainty_streak += 1
                                 gesture, _ = gesture_filter.update(None, hand_present=True)
                                 ui_gesture_text = 'Gesture unclear'
+                                gesture_verification_status = 'Unstable'
                                 last_logged_gesture = None
                                 now = time.time()
                                 if now - last_invalid_log >= error_interval:
@@ -684,33 +707,44 @@ class WorkerThread(QThread):
                                 if stable_state == 'stable' and gesture is not None:
                                     uncertainty_streak = 0
                                     ui_gesture_text = gesture
+                                    gesture_verification_status = 'Stable'
                                     if gesture != last_logged_gesture:
                                         log_gesture_detected(gesture)
                                         last_logged_gesture = gesture
                                 else:
                                     uncertainty_streak += 1
                                     ui_gesture_text = 'Gesture unclear'
+                                    gesture_verification_status = 'Unstable'
                                     last_logged_gesture = None
                         else:
                             # Keep the predefined gesture filter clean while custom is active.
                             gesture_filter.update(None, hand_present=True)
+                            gesture_verification_status = 'Stable'
 
                     # Draw hand skeleton
                     if detection_result is not None:
                         hand_tracker.draw_landmarks(frame, detection_result)
                 else:
-                    uncertainty_streak += 1
-                    gesture, _ = gesture_filter.update(None, hand_present=False)
-                    state.set_landmarks(None)
-                    state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
-                    if custom_confirmation is not None:
-                        custom_confirmation.reset()
-                    ui_gesture_text = 'No hand detected'
-                    now = time.time()
-                    if now - last_no_hand_log >= error_interval:
-                        log_runtime_error('No hand detected')
-                        last_no_hand_log = now
-                    last_logged_gesture = None
+                    if gesture_processing_enabled:
+                        uncertainty_streak += 1
+                        gesture, _ = gesture_filter.update(None, hand_present=False)
+                        state.set_landmarks(None)
+                        state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
+                        if custom_confirmation is not None:
+                            custom_confirmation.reset()
+                        ui_gesture_text = 'No hand detected'
+                        gesture_verification_status = 'Not Detected'
+                        now = time.time()
+                        if now - last_no_hand_log >= error_interval:
+                            log_runtime_error('No hand detected')
+                            last_no_hand_log = now
+                        last_logged_gesture = None
+                    else:
+                        gesture = None
+                        ui_gesture_text = 'Gesture Control Off'
+                        gesture_verification_status = 'Disabled'
+                        state.set_landmarks(None)
+                        state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
 
                 # ----------------------------------------------------------
                 # Activation manager + unified event pipeline
@@ -769,7 +803,7 @@ class WorkerThread(QThread):
                 for event, forced_action, source_label in pending_events:
                     if forced_action is not None:
                         if mode_manager.current_mode == 'System Mode':
-                            auth = face_security_manager.evaluate(frame) if face_security_manager is not None else None
+                            auth = face_security_manager.evaluate(frame) if (face_security_manager is not None and face_security_enabled) else None
                             if auth is not None and not auth.is_authorized:
                                 metrics.record_activation_attempt(succeeded=False)
                                 state.emit_log(_ts(), 'SECURITY', f'Blocked action in System Mode: {auth.status_text}')
@@ -782,7 +816,11 @@ class WorkerThread(QThread):
                         log_action_executed(label)
                         continue
 
-                    result = unified_pipeline.process_event(event, frame_bgr=frame)
+                    result = unified_pipeline.process_event(
+                        event,
+                        frame_bgr=frame,
+                        enforce_face_security=face_security_enabled,
+                    )
 
                     if result.mode_changed:
                         metrics.record_mode_switch()
@@ -802,6 +840,23 @@ class WorkerThread(QThread):
 
                 decision_engine.current_mode = mode_manager.current_mode
                 state.set_mode_stability(decision_engine.mode_stability_progress)
+                state.set_gesture_status(gesture_verification_status)
+
+                lock_reason = 'Ready'
+                activation_locked = False
+                if not gesture_processing_enabled:
+                    activation_locked = True
+                    lock_reason = 'Gesture control disabled'
+                elif time.time() < uncertainty_lock_until:
+                    activation_locked = True
+                    lock_reason = 'Uncertain gesture input'
+                elif mode_manager.current_mode == 'System Mode' and face_security_enabled and not face_authorized:
+                    activation_locked = True
+                    lock_reason = 'Face not authorized'
+                elif gesture_verification_status != 'Stable':
+                    activation_locked = True
+                    lock_reason = 'Waiting for stable gesture'
+                state.set_activation_lock(activation_locked, lock_reason)
 
                 # ----------------------------------------------------------
                 # Update telemetry

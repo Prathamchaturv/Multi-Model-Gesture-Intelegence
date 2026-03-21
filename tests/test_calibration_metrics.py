@@ -63,6 +63,35 @@ def test_calibration_wizard_completes_and_persists() -> None:
         assert 'far_hand_distance' in payload
 
 
+def test_calibration_gesture_threshold_roundtrip() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        cfg = Path(td) / 'calibration.json'
+        mgr = CalibrationManager(config_path=cfg)
+        mgr.update_gesture_threshold(
+            'Open Palm',
+            min_confidence=0.72,
+            required_stability_frames=8,
+            required_hold_seconds=1.3,
+        )
+        mgr.save()
+
+        reloaded = CalibrationManager(config_path=cfg)
+        threshold = reloaded.profile.gesture_thresholds['Open Palm']
+        assert abs(threshold.min_confidence - 0.72) < 1e-9
+        assert threshold.required_stability_frames == 8
+        assert abs(threshold.required_hold_seconds - 1.3) < 1e-9
+
+
+def test_calibration_detects_pinch_from_landmarks() -> None:
+    landmarks = [(0.0, 0.0, 0.0) for _ in range(21)]
+    landmarks[4] = (0.10, 0.10, 0.10)   # thumb tip
+    landmarks[8] = (0.11, 0.11, 0.10)   # index tip nearby
+    assert CalibrationManager.is_pinch_detected(landmarks, threshold=0.03)
+
+    landmarks[8] = (0.30, 0.30, 0.30)
+    assert not CalibrationManager.is_pinch_detected(landmarks, threshold=0.03)
+
+
 def test_metrics_snapshot_computation() -> None:
     metrics = MetricsManager()
     metrics.record_gesture_event(confirmed=True)

@@ -558,6 +558,26 @@ class VisionPanel(QWidget):
             f'color: {ACTIVE}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
         )
 
+        sep_status = QLabel('|')
+        sep_status.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
+
+        gesture_status_title = QLabel('GESTURE STATE')
+        gesture_status_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
+        self._gesture_state_val = QLabel('Not Detected')
+        self._gesture_state_val.setStyleSheet(
+            f'color: {TEXT_SEC}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+        )
+
+        sep_lock = QLabel('|')
+        sep_lock.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
+
+        lock_title = QLabel('ACTIVATION LOCK')
+        lock_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
+        self._activation_lock_val = QLabel('LOCKED')
+        self._activation_lock_val.setStyleSheet(
+            f'color: {INACTIVE}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+        )
+
         sep2 = QLabel('|')
         sep2.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
 
@@ -576,6 +596,12 @@ class VisionPanel(QWidget):
         fb_lay.addWidget(sep_action)
         fb_lay.addWidget(action_title)
         fb_lay.addWidget(self._action_executed_val)
+        fb_lay.addWidget(sep_status)
+        fb_lay.addWidget(gesture_status_title)
+        fb_lay.addWidget(self._gesture_state_val)
+        fb_lay.addWidget(sep_lock)
+        fb_lay.addWidget(lock_title)
+        fb_lay.addWidget(self._activation_lock_val)
         fb_lay.addWidget(sep2)
         fb_lay.addWidget(auth_title)
         fb_lay.addWidget(self._face_auth_val)
@@ -627,6 +653,8 @@ class VisionPanel(QWidget):
         s.action_executed.connect(self._on_action_executed)
         s.face_auth_changed.connect(self._on_face_auth_changed)
         s.voice_command_changed.connect(self._on_voice_command_changed)
+        s.gesture_status_changed.connect(self._on_gesture_status_changed)
+        s.activation_lock_changed.connect(self._on_activation_lock_changed)
 
     @pyqtSlot(QImage)
     def update_frame(self, image: QImage) -> None:
@@ -697,6 +725,29 @@ class VisionPanel(QWidget):
     @pyqtSlot(float)
     def _on_stability_changed(self, progress: float) -> None:
         self._stability_bar.setValue(int(progress * 100))
+
+    @pyqtSlot(str)
+    def _on_gesture_status_changed(self, status: str) -> None:
+        self._gesture_state_val.setText(status if status else 'Not Detected')
+        status_lower = (status or '').lower()
+        if status_lower == 'stable':
+            colour = ACTIVE
+        elif status_lower == 'disabled':
+            colour = TEXT_HINT
+        else:
+            colour = INACTIVE
+        self._gesture_state_val.setStyleSheet(
+            f'color: {colour}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+        )
+
+    @pyqtSlot(bool, str)
+    def _on_activation_lock_changed(self, locked: bool, reason: str) -> None:
+        text = f'LOCKED ({reason})' if locked else 'READY'
+        colour = INACTIVE if locked else ACTIVE
+        self._activation_lock_val.setText(text)
+        self._activation_lock_val.setStyleSheet(
+            f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+        )
 
     @pyqtSlot(bool)
     def _on_active_changed(self, active: bool) -> None:
@@ -1969,11 +2020,38 @@ class SettingsPanel(QWidget):
         self._cfg = _load_face_security_config()
         self._calibration = CalibrationManager()
         self._wizard_active = False
+        self._latest_preview_image: QImage | None = None
+        self._verification_samples = 0
+        self._verification_hits = 0
         self._build_ui()
+        self._connect_state()
         self._sync_ui_from_config()
 
     def set_worker(self, worker: WorkerThread | None) -> None:
         self._worker = worker
+
+    @pyqtSlot(QImage)
+    def update_preview_frame(self, image: QImage) -> None:
+        self._latest_preview_image = image
+        if not hasattr(self, '_preview_label'):
+            return
+        w = self._preview_label.width()
+        h = self._preview_label.height()
+        if w < 8 or h < 8:
+            return
+        pix = QPixmap.fromImage(image).scaled(
+            w,
+            h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._preview_label.setPixmap(pix)
+
+    def _connect_state(self) -> None:
+        self._state.gesture_changed.connect(self._on_live_gesture)
+        self._state.confidence_changed.connect(self._on_live_confidence)
+        self._state.gesture_status_changed.connect(self._on_live_gesture_status)
+        self._state.mode_changed.connect(self._on_mode_changed)
 
     def _build_ui(self) -> None:
         self.setStyleSheet(f'background-color: {BG_DEEP};')
@@ -2039,6 +2117,52 @@ class SettingsPanel(QWidget):
         lay.addWidget(self._status_lbl)
 
         root.addWidget(card)
+
+        runtime_card = QFrame()
+        runtime_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        runtime_lay = QVBoxLayout(runtime_card)
+        runtime_lay.setContentsMargins(16, 14, 16, 16)
+        runtime_lay.setSpacing(8)
+
+        runtime_title = QLabel('RUNTIME CONTROLS')
+        runtime_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        runtime_lay.addWidget(runtime_title)
+        runtime_lay.addWidget(_divider())
+
+        self._voice_toggle = QCheckBox('Enable Voice Listener')
+        self._voice_toggle.setStyleSheet(self._face_toggle.styleSheet())
+        self._voice_toggle.stateChanged.connect(lambda _: self._state.set_voice_listener_enabled(self._voice_toggle.isChecked()))
+        runtime_lay.addWidget(self._voice_toggle)
+
+        self._gesture_toggle = QCheckBox('Enable Gesture Control')
+        self._gesture_toggle.setStyleSheet(self._face_toggle.styleSheet())
+        self._gesture_toggle.stateChanged.connect(lambda _: self._state.set_gesture_control_enabled(self._gesture_toggle.isChecked()))
+        runtime_lay.addWidget(self._gesture_toggle)
+
+        mode_row = QHBoxLayout()
+        mode_lbl = QLabel('Manual Mode')
+        mode_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItems(['App Mode', 'Media Mode', 'System Mode'])
+        self._mode_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 6px; padding: 5px 8px; font-size: 12px;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox:hover {{ border-color: {ACCENT}; }}
+        """)
+        self._mode_combo.currentTextChanged.connect(self._state.request_mode)
+        mode_row.addWidget(mode_lbl)
+        mode_row.addStretch()
+        mode_row.addWidget(self._mode_combo)
+        runtime_lay.addLayout(mode_row)
+
+        root.addWidget(runtime_card)
 
         calib_card = QFrame()
         calib_card.setStyleSheet(
@@ -2126,6 +2250,60 @@ class SettingsPanel(QWidget):
         calib_lay.addWidget(self._calib_status_lbl)
 
         root.addWidget(calib_card)
+
+        verify_card = QFrame()
+        verify_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        verify_lay = QVBoxLayout(verify_card)
+        verify_lay.setContentsMargins(16, 14, 16, 16)
+        verify_lay.setSpacing(8)
+
+        verify_title = QLabel('GESTURE VERIFICATION')
+        verify_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        verify_lay.addWidget(verify_title)
+        verify_lay.addWidget(_divider())
+
+        self._preview_label = QLabel('Live preview unavailable')
+        self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_label.setMinimumHeight(160)
+        self._preview_label.setStyleSheet(
+            f'background: #000; color: {TEXT_HINT}; border: 1px solid {BORDER}; border-radius: 8px;'
+        )
+        verify_lay.addWidget(self._preview_label)
+
+        verify_row = QHBoxLayout()
+        self._verify_gesture_combo = QComboBox()
+        self._verify_gesture_combo.addItems(['Open Palm', 'Pinch', 'Three Fingers Hold'])
+        self._verify_gesture_combo.setStyleSheet(self._mode_combo.styleSheet())
+        self._test_gesture_btn = QPushButton('Test Gesture')
+        self._test_gesture_btn.setFixedHeight(30)
+        self._test_gesture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._test_gesture_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(0,229,255,0.12); color: {ACCENT}; border: 1px solid {ACCENT};
+                border-radius: 8px; font-size: 12px; font-weight: 700;
+            }}
+            QPushButton:hover {{ background: rgba(0,229,255,0.24); }}
+        """)
+        self._test_gesture_btn.clicked.connect(self._on_test_gesture)
+        verify_row.addWidget(self._verify_gesture_combo)
+        verify_row.addWidget(self._test_gesture_btn)
+        verify_lay.addLayout(verify_row)
+
+        self._verify_feedback_lbl = QLabel('Select a target gesture and click Test Gesture.')
+        self._verify_feedback_lbl.setWordWrap(True)
+        self._verify_feedback_lbl.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px; background: transparent; border: none;')
+        verify_lay.addWidget(self._verify_feedback_lbl)
+
+        self._live_metrics_lbl = QLabel('Live: confidence=0.00, distance=n/a, status=Not Detected')
+        self._live_metrics_lbl.setWordWrap(True)
+        self._live_metrics_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        verify_lay.addWidget(self._live_metrics_lbl)
+
+        root.addWidget(verify_card)
         root.addStretch()
 
     def _slider_row(
@@ -2183,6 +2361,20 @@ class SettingsPanel(QWidget):
         self._face_toggle.blockSignals(True)
         self._face_toggle.setChecked(bool(self._cfg.get('enabled', True)))
         self._face_toggle.blockSignals(False)
+        self._state.set_face_security_enabled(bool(self._cfg.get('enabled', True)))
+
+        self._voice_toggle.blockSignals(True)
+        self._voice_toggle.setChecked(bool(self._state.voice_listener_enabled))
+        self._voice_toggle.blockSignals(False)
+
+        self._gesture_toggle.blockSignals(True)
+        self._gesture_toggle.setChecked(bool(self._state.gesture_control_enabled))
+        self._gesture_toggle.blockSignals(False)
+
+        self._mode_combo.blockSignals(True)
+        idx = self._mode_combo.findText(self._state.current_mode)
+        self._mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._mode_combo.blockSignals(False)
 
         profile = self._calibration.profile
         self._hold_time_slider.blockSignals(True)
@@ -2204,6 +2396,7 @@ class SettingsPanel(QWidget):
 
     def _on_toggle_face_security(self, _state: int) -> None:
         self._cfg['enabled'] = self._face_toggle.isChecked()
+        self._state.set_face_security_enabled(self._cfg['enabled'])
         try:
             _save_face_security_config(self._cfg)
             if self._cfg['enabled']:
@@ -2302,6 +2495,70 @@ class SettingsPanel(QWidget):
         self._calib_status_lbl.setStyleSheet(
             f'color: {ACCENT}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
         )
+
+    @pyqtSlot(str)
+    def _on_live_gesture(self, gesture: str) -> None:
+        confidence = self._state.confidence
+        hand_distance = CalibrationManager.estimate_hand_distance(getattr(self._state, '_latest_landmarks', None))
+        distance_text = f'{hand_distance:.3f}' if hand_distance is not None else 'n/a'
+        self._live_metrics_lbl.setText(
+            f'Live: confidence={confidence:.2f}, distance={distance_text}, status={self._state.gesture_status}'
+        )
+
+    @pyqtSlot(float)
+    def _on_live_confidence(self, _confidence: float) -> None:
+        self._on_live_gesture(self._state.current_gesture)
+
+    @pyqtSlot(str)
+    def _on_live_gesture_status(self, _status: str) -> None:
+        self._on_live_gesture(self._state.current_gesture)
+
+    @pyqtSlot(str)
+    def _on_mode_changed(self, mode: str) -> None:
+        self._mode_combo.blockSignals(True)
+        idx = self._mode_combo.findText(mode)
+        if idx >= 0:
+            self._mode_combo.setCurrentIndex(idx)
+        self._mode_combo.blockSignals(False)
+
+    def _on_test_gesture(self) -> None:
+        target = self._verify_gesture_combo.currentText()
+        gesture = self._state.current_gesture
+        confidence = float(self._state.confidence)
+        landmarks = getattr(self._state, '_latest_landmarks', None)
+
+        detected = False
+        if target == 'Open Palm':
+            detected = gesture.strip().lower() == 'open palm'
+        elif target == 'Pinch':
+            detected = CalibrationManager.is_pinch_detected(landmarks)
+        elif target == 'Three Fingers Hold':
+            detected = gesture.strip().lower() in {'three fingers', 'three fingers hold'}
+
+        threshold = self._calibration.profile.gesture_thresholds.get(target)
+        min_conf = threshold.min_confidence if threshold is not None else 0.5
+        stable_ok = self._state.gesture_status.lower() == 'stable'
+        pass_now = detected and confidence >= min_conf and stable_ok
+
+        self._verification_samples += 1
+        if pass_now:
+            self._verification_hits += 1
+
+        pass_rate = (self._verification_hits / self._verification_samples) * 100.0
+        if pass_now:
+            self._verify_feedback_lbl.setText(
+                f'Detected: {target} (confidence={confidence:.2f} >= {min_conf:.2f}, stable={stable_ok}). Pass rate {pass_rate:.0f}%.'
+            )
+            self._verify_feedback_lbl.setStyleSheet(
+                f'color: {ACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
+        else:
+            self._verify_feedback_lbl.setText(
+                f'Not detected: {target}. Need confidence >= {min_conf:.2f} and stable gesture. Pass rate {pass_rate:.0f}%.'
+            )
+            self._verify_feedback_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
 
     def refresh(self) -> None:
         self._sync_ui_from_config()
@@ -2528,6 +2785,7 @@ class MainWindow(QMainWindow):
         def _factory() -> WorkerThread:
             worker = WorkerThread(self._state, parent=self)
             worker.frame_ready.connect(self._vision.update_frame)
+            worker.frame_ready.connect(self._settings_panel.update_preview_frame)
             worker.error.connect(self._on_worker_error)
             return worker
 
@@ -2546,6 +2804,7 @@ class MainWindow(QMainWindow):
         def _factory() -> WorkerThread:
             worker = WorkerThread(self._state, parent=self)
             worker.frame_ready.connect(self._vision.update_frame)
+            worker.frame_ready.connect(self._settings_panel.update_preview_frame)
             worker.error.connect(self._on_worker_error)
             return worker
 

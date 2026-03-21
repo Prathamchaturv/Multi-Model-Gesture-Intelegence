@@ -56,6 +56,12 @@ class SharedState(QObject):
     voice_command_changed   = pyqtSignal(str)
     cursor_sensitivity_changed = pyqtSignal(float)
     metrics_changed         = pyqtSignal(dict)
+    gesture_status_changed  = pyqtSignal(str)
+    face_security_enabled_changed = pyqtSignal(bool)
+    voice_listener_enabled_changed = pyqtSignal(bool)
+    gesture_control_enabled_changed = pyqtSignal(bool)
+    mode_request_changed    = pyqtSignal(str)
+    activation_lock_changed = pyqtSignal(bool, str)
 
     # Batched update – emits a snapshot dict for panels that want everything
     snapshot_ready          = pyqtSignal(dict)
@@ -90,6 +96,13 @@ class SharedState(QObject):
             'avg_response_latency_ms': 0.0,
             'mode_switches_per_min': 0.0,
         }
+        self._gesture_status = 'Not Detected'
+        self._face_security_enabled = True
+        self._voice_listener_enabled = True
+        self._gesture_control_enabled = True
+        self._requested_mode = 'App Mode'
+        self._activation_locked = True
+        self._activation_lock_reason = 'Waiting for stable gesture'
 
     # ------------------------------------------------------------------ getters
     @property
@@ -120,6 +133,20 @@ class SharedState(QObject):
     def cursor_sensitivity(self) -> float: return self._cursor_sensitivity
     @property
     def metrics(self) -> dict: return dict(self._metrics)
+    @property
+    def gesture_status(self) -> str: return self._gesture_status
+    @property
+    def face_security_enabled(self) -> bool: return self._face_security_enabled
+    @property
+    def voice_listener_enabled(self) -> bool: return self._voice_listener_enabled
+    @property
+    def gesture_control_enabled(self) -> bool: return self._gesture_control_enabled
+    @property
+    def requested_mode(self) -> str: return self._requested_mode
+    @property
+    def activation_locked(self) -> bool: return self._activation_locked
+    @property
+    def activation_lock_reason(self) -> str: return self._activation_lock_reason
 
     # ------------------------------------------------------------------ setters
     def set_system_active(self, value: bool) -> None:
@@ -194,6 +221,46 @@ class SharedState(QObject):
             self._voice_command = value
             self.voice_command_changed.emit(value)
 
+    def set_gesture_status(self, value: str) -> None:
+        """Broadcast gesture verification status for runtime/debug UI."""
+        status = str(value)
+        if self._gesture_status != status:
+            self._gesture_status = status
+            self.gesture_status_changed.emit(status)
+
+    def set_face_security_enabled(self, enabled: bool) -> None:
+        value = bool(enabled)
+        if self._face_security_enabled != value:
+            self._face_security_enabled = value
+            self.face_security_enabled_changed.emit(value)
+
+    def set_voice_listener_enabled(self, enabled: bool) -> None:
+        value = bool(enabled)
+        if self._voice_listener_enabled != value:
+            self._voice_listener_enabled = value
+            self.voice_listener_enabled_changed.emit(value)
+
+    def set_gesture_control_enabled(self, enabled: bool) -> None:
+        value = bool(enabled)
+        if self._gesture_control_enabled != value:
+            self._gesture_control_enabled = value
+            self.gesture_control_enabled_changed.emit(value)
+
+    def request_mode(self, mode: str) -> None:
+        value = str(mode)
+        if self._requested_mode != value:
+            self._requested_mode = value
+            self.mode_request_changed.emit(value)
+
+    def set_activation_lock(self, locked: bool, reason: str) -> None:
+        new_locked = bool(locked)
+        new_reason = str(reason)
+        changed = new_locked != self._activation_locked or new_reason != self._activation_lock_reason
+        self._activation_locked = new_locked
+        self._activation_lock_reason = new_reason
+        if changed:
+            self.activation_lock_changed.emit(new_locked, new_reason)
+
     def set_cursor_sensitivity(self, value: float) -> None:
         """Broadcast dynamic cursor sensitivity from calibration policy."""
         clamped = round(max(0.1, min(3.0, float(value))), 2)
@@ -234,6 +301,13 @@ class SharedState(QObject):
             'voice_command': self._voice_command,
             'cursor_sensitivity': self._cursor_sensitivity,
             'metrics': dict(self._metrics),
+            'gesture_status': self._gesture_status,
+            'face_security_enabled': self._face_security_enabled,
+            'voice_listener_enabled': self._voice_listener_enabled,
+            'gesture_control_enabled': self._gesture_control_enabled,
+            'requested_mode': self._requested_mode,
+            'activation_locked': self._activation_locked,
+            'activation_lock_reason': self._activation_lock_reason,
         }
 
     def _emit_snapshot(self) -> None:

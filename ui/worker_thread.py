@@ -616,10 +616,11 @@ class WorkerThread(QThread):
                 elif not state.voice_listener_enabled:
                     state.set_voice_command('Voice Control Off')
 
+                system_is_active = activation_manager.is_active
+
                 face_authorized = True
                 face_status = face_security_manager.setup_status_text
-                mode_is_system = mode_manager.current_mode == 'System Mode'
-                if mode_is_system and face_security_enabled:
+                if system_is_active and face_security_enabled:
                     face_result = face_security_manager.evaluate(frame)
                     face_authorized = face_result.is_authorized
                     prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
@@ -632,13 +633,12 @@ class WorkerThread(QThread):
                             face_result.status_text,
                             face_result.similarity,
                         )
-                elif mode_is_system and not face_security_enabled:
+                elif system_is_active and not face_security_enabled:
                     face_authorized = True
                     face_status = 'UNLOCKED | Face security disabled'
                 else:
-                    # Outside System Mode, face auth is informational only.
-                    face_authorized = False
-                    face_status = 'Face Auth: System Mode Only'
+                    face_authorized = True
+                    face_status = 'Face Auth: System Inactive'
                 state.set_face_auth(face_authorized, face_status)
 
                 # ----------------------------------------------------------
@@ -757,6 +757,7 @@ class WorkerThread(QThread):
                 should_execute = activation_manager.update(gesture)
                 state.set_system_active(activation_manager.is_active)
                 state.set_cooldown(activation_manager.is_in_cooldown)
+                system_is_active = activation_manager.is_active
 
                 pending_events = []
                 gesture_event = None
@@ -812,11 +813,11 @@ class WorkerThread(QThread):
 
                 for event, forced_action, source_label in pending_events:
                     if forced_action is not None:
-                        if mode_manager.current_mode == 'System Mode':
+                        if system_is_active:
                             auth = face_security_manager.evaluate(frame) if (face_security_manager is not None and face_security_enabled) else None
                             if auth is not None and not auth.is_authorized:
                                 metrics.record_activation_attempt(succeeded=False)
-                                state.emit_log(_ts(), 'SECURITY', f'Blocked action in System Mode: {auth.status_text}')
+                                state.emit_log(_ts(), 'SECURITY', f'Blocked action while system active: {auth.status_text}')
                                 continue
                         action_executor.execute(forced_action)
                         metrics.record_activation_attempt(succeeded=True)
@@ -829,7 +830,7 @@ class WorkerThread(QThread):
                     result = unified_pipeline.process_event(
                         event,
                         frame_bgr=frame,
-                        enforce_face_security=face_security_enabled,
+                        enforce_face_security=face_security_enabled and system_is_active,
                     )
 
                     if result.mode_changed:
@@ -842,7 +843,7 @@ class WorkerThread(QThread):
 
                     if result.blocked_reason == 'face_unauthorized':
                         metrics.record_activation_attempt(succeeded=False)
-                        state.emit_log(_ts(), 'SECURITY', f'Blocked action in System Mode: {result.security_status}')
+                        state.emit_log(_ts(), 'SECURITY', f'Blocked action while system active: {result.security_status}')
 
                     if result.action:
                         metrics.record_activation_attempt(succeeded=True)
@@ -863,7 +864,7 @@ class WorkerThread(QThread):
                 elif time.time() < uncertainty_lock_until:
                     activation_locked = True
                     lock_reason = 'Uncertain gesture input'
-                elif mode_manager.current_mode == 'System Mode' and face_security_enabled and not face_authorized:
+                elif system_is_active and face_security_enabled and not face_authorized:
                     activation_locked = True
                     lock_reason = 'Face not authorized'
                 elif gesture_verification_status != 'Stable':

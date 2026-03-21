@@ -6,7 +6,7 @@ Pipeline
 Input (Gesture / Voice)
 -> InputEventNormalizer
 -> DecisionEngine
--> Security Layer (Face Authorization for System Mode)
+-> Security Layer (Face Authorization when enforcement is active)
 -> ModeManager
 -> ActionExecutor
 """
@@ -206,7 +206,7 @@ class UnifiedDecisionPipeline:
                 blocked_reason='conflict_duplicate_ignored',
             )
 
-        if enforce_face_security and self._mode_manager.current_mode == 'System Mode' and self._face_security is not None:
+        if enforce_face_security and self._face_security is not None:
             auth_result = self._face_security.evaluate(frame_bgr)
             log_security_check(auth_result.is_authorized, auth_result.status_text)
             if not auth_result.is_authorized:

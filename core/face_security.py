@@ -1,6 +1,6 @@
 """
 Module: face_security.py
-Description: Face-based authorization gate for System Mode.
+Description: Face-based authorization gate for active system control.
 
 Uses MediaPipe face detection to find a face ROI, builds a lightweight
 deterministic face encoding from grayscale texture features, and compares it
@@ -98,7 +98,7 @@ class FaceSecurityManager:
         if not self._enabled:
             return 'Face Security Disabled'
         if self.has_reference:
-            return 'Face Security Ready (System Mode Only)'
+            return 'Face Security Ready (When System Is Active)'
         return 'Face Security Setup Required: add config/authorized_face.jpg'
 
     def evaluate(self, frame_bgr) -> FaceAuthResult:

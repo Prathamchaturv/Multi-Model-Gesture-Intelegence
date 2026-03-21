@@ -529,6 +529,7 @@ class WorkerThread(QThread):
             uncertainty_lock_was_active = False
             last_safety_lock_log = 0.0
             last_face_auth_signature: tuple[bool, str] | None = None
+            face_lock_forced_off = False
             voice_backoff_until = 0.0
 
             warning_interval = 1.5
@@ -758,6 +759,17 @@ class WorkerThread(QThread):
                 state.set_system_active(activation_manager.is_active)
                 state.set_cooldown(activation_manager.is_in_cooldown)
                 system_is_active = activation_manager.is_active
+
+                if system_is_active and face_security_enabled and not face_authorized:
+                    activation_manager.force_inactive('Face not authorized')
+                    should_execute = False
+                    system_is_active = False
+                    state.set_system_active(False)
+                    if not face_lock_forced_off:
+                        state.emit_log(_ts(), 'SECURITY', 'System turned OFF: face authorization locked')
+                    face_lock_forced_off = True
+                else:
+                    face_lock_forced_off = False
 
                 pending_events = []
                 gesture_event = None

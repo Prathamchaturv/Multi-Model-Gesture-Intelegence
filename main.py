@@ -39,9 +39,11 @@ def run_headless() -> None:
     from core.camera              import Camera
     from core.hand_tracking       import HandTracker
     from core.gesture_classifier  import GestureClassifier
+    from core.face_security       import FaceSecurityManager
     from engine.activation_manager import ActivationManager
     from engine.decision_engine    import DecisionEngine
     from engine.action_executor    import ActionExecutor
+    from engine.unified_pipeline   import InputEventNormalizer, ModeManager, UnifiedDecisionPipeline
     from utils.fps_counter         import FPSCounter
     from utils.config              import Config
 
@@ -74,6 +76,17 @@ def run_headless() -> None:
             stability_threshold  = config.get('activation.stability_threshold'),
         )
         decision_engine    = DecisionEngine()
+        mode_manager       = ModeManager(initial_mode=decision_engine.current_mode)
+        face_security      = FaceSecurityManager(
+            enabled=bool(config.get('face_security.enabled', True)),
+            authorized_image_path=str(config.get('face_security.authorized_image_path', 'config/authorized_face.jpg')),
+            authorized_encoding_path=str(config.get('face_security.authorized_encoding_path', 'config/authorized_face_encoding.json')),
+            similarity_threshold=float(config.get('face_security.similarity_threshold', 0.84)),
+            min_detection_confidence=float(config.get('face_security.min_detection_confidence', 0.6)),
+            eval_interval_s=float(config.get('face_security.eval_interval_s', 0.08)),
+            away_delay_s=float(config.get('face_security.away_delay_s', 2.5)),
+            return_confirm_s=float(config.get('face_security.return_confirm_s', 0.7)),
+        )
         custom_matcher = None
         custom_confirm = None
         if bool(config.get('adaptive_gesture.enabled', True)):
@@ -94,6 +107,12 @@ def run_headless() -> None:
             'brave_path':        config.get('apps.brave_path'),
             'apple_music_aumid': config.get('apps.apple_music_aumid'),
         })
+        unified_pipeline = UnifiedDecisionPipeline(
+            decision_engine=decision_engine,
+            action_executor=action_executor,
+            mode_manager=mode_manager,
+            face_security=face_security,
+        )
         fps_counter        = FPSCounter()
 
         print('[Ready] Show Open Palm 2 s to activate. Press q/ESC to quit.\n')
@@ -135,17 +154,24 @@ def run_headless() -> None:
             elif custom_confirm is not None:
                 custom_confirm.reset()
 
-            if custom_action:
-                decision_engine.process(None)
-                action, mode_changed = custom_action, False
-            else:
-                action, mode_changed = decision_engine.process(gesture)
-            if mode_changed:
-                print(f'  Mode → {decision_engine.current_mode}')
-
             should_exec = activation_manager.update(gesture)
-            if should_exec and action:
-                action_executor.execute(action)
+
+            action = None
+            if custom_action and should_exec:
+                action_executor.execute(custom_action)
+                action = custom_action
+            elif gesture:
+                if decision_engine.is_mode_switch(gesture) or should_exec:
+                    event = InputEventNormalizer.from_gesture(
+                        gesture=gesture,
+                        confidence=1.0,
+                    )
+                    decision = unified_pipeline.process_event(event, frame_bgr=frame)
+                    if decision.mode_changed:
+                        print(f'  Mode -> {decision.mode}')
+                    action = decision.action
+
+            if action:
                 print(f'  Action: {action}')
 
             fps_counter.display_fps(frame)

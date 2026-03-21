@@ -47,10 +47,16 @@ from core.adaptive_gesture_learning import (
     CustomGestureStore,
     MultiFrameGestureConfirmation,
 )
+from core.face_security          import FaceSecurityManager
 from core.voice_control          import VoiceCommandListener
 from engine.activation_manager   import ActivationManager
 from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
+from engine.unified_pipeline     import (
+    InputEventNormalizer,
+    ModeManager,
+    UnifiedDecisionPipeline,
+)
 from utils.fps_counter           import FPSCounter
 from utils.config                import Config
 from utils.logger                import (
@@ -163,6 +169,34 @@ def _load_voice_control_settings(config: Config) -> dict:
     }
 
     path = Path(__file__).parent.parent / 'config' / 'voice_control.json'
+    if not path.exists():
+        return settings
+
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            raw = json.load(fh)
+    except Exception:
+        return settings
+
+    if isinstance(raw, dict):
+        settings.update(raw)
+    return settings
+
+
+def _load_face_security_settings(config: Config) -> dict:
+    """Load face-security runtime settings from config/face_security.json."""
+    settings = {
+        'enabled': bool(config.get('face_security.enabled', True)),
+        'authorized_image_path': str(config.get('face_security.authorized_image_path', 'config/authorized_face.jpg')),
+        'authorized_encoding_path': str(config.get('face_security.authorized_encoding_path', 'config/authorized_face_encoding.json')),
+        'similarity_threshold': float(config.get('face_security.similarity_threshold', 0.84)),
+        'min_detection_confidence': float(config.get('face_security.min_detection_confidence', 0.6)),
+        'eval_interval_s': float(config.get('face_security.eval_interval_s', 0.08)),
+        'away_delay_s': float(config.get('face_security.away_delay_s', 2.5)),
+        'return_confirm_s': float(config.get('face_security.return_confirm_s', 0.7)),
+    }
+
+    path = Path(__file__).parent.parent / 'config' / 'face_security.json'
     if not path.exists():
         return settings
 
@@ -342,6 +376,7 @@ class WorkerThread(QThread):
         state = self._state
         camera: Camera | None = None
         voice_listener: VoiceCommandListener | None = None
+        face_security_manager: FaceSecurityManager | None = None
 
         try:
             config = Config()
@@ -358,10 +393,6 @@ class WorkerThread(QThread):
             )
             voice_enabled_for_fusion = voice_listener.is_enabled
             voice_system_mode_only = bool(voice_cfg.get('system_mode_only', True))
-            voice_action_map = {
-                str(k): str(v)
-                for k, v in dict(voice_cfg.get('system_mode_voice_actions', {})).items()
-            }
             voice_listener.start()
             state.set_voice_command('Listening...' if voice_enabled_for_fusion else 'Voice Unavailable')
             last_voice_error: str | None = None
@@ -408,11 +439,29 @@ class WorkerThread(QThread):
             )
 
             decision_engine = DecisionEngine()
+            mode_manager = ModeManager(cooldown_s=2.0, initial_mode=decision_engine.current_mode)
+            face_security_cfg = _load_face_security_settings(config)
+            face_security_manager = FaceSecurityManager(
+                enabled=bool(face_security_cfg.get('enabled', True)),
+                authorized_image_path=str(face_security_cfg.get('authorized_image_path', 'config/authorized_face.jpg')),
+                authorized_encoding_path=str(face_security_cfg.get('authorized_encoding_path', 'config/authorized_face_encoding.json')),
+                similarity_threshold=float(face_security_cfg.get('similarity_threshold', 0.84)),
+                min_detection_confidence=float(face_security_cfg.get('min_detection_confidence', 0.6)),
+                eval_interval_s=float(face_security_cfg.get('eval_interval_s', 0.08)),
+                away_delay_s=float(face_security_cfg.get('away_delay_s', 2.5)),
+                return_confirm_s=float(face_security_cfg.get('return_confirm_s', 0.7)),
+            )
 
             action_executor = ActionExecutor(config={
                 'brave_path':        config.get('apps.brave_path'),
                 'apple_music_aumid': config.get('apps.apple_music_aumid'),
             })
+            unified_pipeline = UnifiedDecisionPipeline(
+                decision_engine=decision_engine,
+                action_executor=action_executor,
+                mode_manager=mode_manager,
+                face_security=face_security_manager,
+            )
 
             fps_counter = FPSCounter()
             gesture_filter = GestureStabilityFilter(confirm_frames=4, min_switch_interval_s=0.25)
@@ -468,10 +517,13 @@ class WorkerThread(QThread):
                         state.set_voice_command('Mic Active - Speak Command')
 
                 face_authorized = True
-                face_status = 'Face Security: Login Only'
-                user_away = False
-                mode_is_system = decision_engine.current_mode == 'System Mode'
-                state.set_face_auth(True, face_status)
+                face_status = face_security_manager.setup_status_text
+                mode_is_system = mode_manager.current_mode == 'System Mode'
+                if mode_is_system:
+                    face_result = face_security_manager.evaluate(frame)
+                    face_authorized = face_result.is_authorized
+                    face_status = face_result.status_text
+                state.set_face_auth(face_authorized, face_status)
 
                 # ----------------------------------------------------------
                 # Hand detection + gesture classification
@@ -560,62 +612,70 @@ class WorkerThread(QThread):
                     last_logged_gesture = None
 
                 # ----------------------------------------------------------
-                # Smart Mode decision
-                # ----------------------------------------------------------
-                if custom_action:
-                    # Custom gestures have priority over predefined resolution.
-                    decision_engine.process(None)
-                    action, mode_changed = custom_action, False
-                else:
-                    action, mode_changed = decision_engine.process(gesture)
-
-                if mode_changed:
-                    new_mode = decision_engine.current_mode
-                    state.set_mode(new_mode)
-                    state.emit_log(_ts(), 'MODE', f'Switched to {new_mode}')
-
-                # Mode-switch stability bar
-                state.set_mode_stability(decision_engine.mode_stability_progress)
-
-                # ----------------------------------------------------------
-                # Activation manager
+                # Activation manager + unified event pipeline
                 # ----------------------------------------------------------
                 should_execute = activation_manager.update(gesture)
                 state.set_system_active(activation_manager.is_active)
                 state.set_cooldown(activation_manager.is_in_cooldown)
 
-                # ----------------------------------------------------------
-                # Execute action  (voice commands in System Mode; gestures in App/Media)
-                # ----------------------------------------------------------
-                if should_execute and custom_action:
-                    action_executor.execute(custom_action)
-                    label = action_executor._LABELS.get(custom_action, custom_action)
-                    state.emit_log(_ts(), 'ACTION', f'{label}  [Custom Gesture]')
-                    state.set_action_executed(custom_action)
-                    log_action_executed(label)
-                elif (
-                    voice_event is not None
-                    and voice_event.command != '__unmapped__'
-                    and voice_enabled_for_fusion
-                    and decision_engine.current_mode == 'System Mode'
-                ):
-                    if (not voice_system_mode_only) or decision_engine.current_mode == 'System Mode':
-                        mapped_action = voice_action_map.get(voice_event.command)
-                    else:
-                        mapped_action = None
+                pending_events = []
 
-                    if mapped_action:
-                        action_executor.execute(mapped_action)
-                        label = action_executor._LABELS.get(mapped_action, mapped_action)
-                        state.emit_log(_ts(), 'ACTION', f'{label}  [System Mode Voice]')
-                        state.set_action_executed(mapped_action)
+                if custom_action and should_execute:
+                    # Custom gestures bypass map lookup but still use unified execution path.
+                    custom_event = InputEventNormalizer.from_gesture(
+                        gesture='Custom Action',
+                        confidence=confidence,
+                    )
+                    pending_events.append((custom_event, custom_action, 'Custom Gesture'))
+                elif gesture:
+                    if decision_engine.is_mode_switch(gesture) or should_execute:
+                        gesture_event = InputEventNormalizer.from_gesture(
+                            gesture=gesture,
+                            confidence=confidence,
+                        )
+                        pending_events.append((gesture_event, None, mode_manager.current_mode))
+
+                if voice_event is not None and voice_event.command != '__unmapped__' and voice_enabled_for_fusion:
+                    if (not voice_system_mode_only) or mode_manager.current_mode == 'System Mode':
+                        voice_command = voice_event.command
+                        voice_input = InputEventNormalizer.from_voice(
+                            command=voice_command,
+                            confidence=1.0,
+                            timestamp=voice_event.timestamp,
+                        )
+                        pending_events.append((voice_input, None, 'Voice'))
+
+                for event, forced_action, source_label in pending_events:
+                    if forced_action is not None:
+                        if mode_manager.current_mode == 'System Mode':
+                            auth = face_security_manager.evaluate(frame) if face_security_manager is not None else None
+                            if auth is not None and not auth.is_authorized:
+                                state.emit_log(_ts(), 'SECURITY', f'Blocked action in System Mode: {auth.status_text}')
+                                continue
+                        action_executor.execute(forced_action)
+                        label = action_executor._LABELS.get(forced_action, forced_action)
+                        state.emit_log(_ts(), 'ACTION', f'{label}  [{source_label}]')
+                        state.set_action_executed(forced_action)
                         log_action_executed(label)
-                elif should_execute and action:
-                    action_executor.execute(action)
-                    label = action_executor._LABELS.get(action, action)
-                    state.emit_log(_ts(), 'ACTION', f'{label}  [{decision_engine.current_mode}]')
-                    state.set_action_executed(action)
-                    log_action_executed(label)
+                        continue
+
+                    result = unified_pipeline.process_event(event, frame_bgr=frame)
+
+                    if result.mode_changed:
+                        state.set_mode(result.mode)
+                        state.emit_log(_ts(), 'MODE', f'Switched to {result.mode}')
+
+                    if result.blocked_reason == 'face_unauthorized':
+                        state.emit_log(_ts(), 'SECURITY', f'Blocked action in System Mode: {result.security_status}')
+
+                    if result.action:
+                        label = action_executor._LABELS.get(result.action, result.action)
+                        state.emit_log(_ts(), 'ACTION', f'{label}  [{source_label}]')
+                        state.set_action_executed(result.action)
+                        log_action_executed(label)
+
+                decision_engine.current_mode = mode_manager.current_mode
+                state.set_mode_stability(decision_engine.mode_stability_progress)
 
                 # ----------------------------------------------------------
                 # Update telemetry
@@ -634,11 +694,11 @@ class WorkerThread(QThread):
                 _draw_overlay(
                     frame,
                     gesture,
-                    decision_engine.current_mode,
+                    mode_manager.current_mode,
                     activation_manager.is_active,
                     fps_counter.fps,
-                    face_status=face_status if decision_engine.current_mode == 'System Mode' else None,
-                    face_authorized=face_authorized if decision_engine.current_mode == 'System Mode' else None,
+                    face_status=face_status if mode_manager.current_mode == 'System Mode' else None,
+                    face_authorized=face_authorized if mode_manager.current_mode == 'System Mode' else None,
                 )
 
                 self.frame_ready.emit(_frame_to_qimage(frame))
@@ -648,6 +708,8 @@ class WorkerThread(QThread):
             hand_tracker.close()
             if voice_listener is not None:
                 voice_listener.stop()
+            if face_security_manager is not None:
+                face_security_manager.close()
             state.set_system_active(False)
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline stopped')
             log_pipeline_state('Pipeline stopped')
@@ -668,5 +730,10 @@ class WorkerThread(QThread):
             try:
                 if voice_listener is not None:
                     voice_listener.stop()
+            except Exception:
+                pass
+            try:
+                if face_security_manager is not None:
+                    face_security_manager.close()
             except Exception:
                 pass

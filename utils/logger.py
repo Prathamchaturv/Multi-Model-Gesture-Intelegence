@@ -116,6 +116,32 @@ def log_pipeline_state(message: str) -> None:
     get_mmgi_logger().info(message)
 
 
+def log_input_received(input_type: str, command: str, confidence: float) -> None:
+    """Log each normalized input entering the decision pipeline."""
+    get_mmgi_logger().info(
+        'Input received: type=%s command=%s confidence=%.3f',
+        input_type,
+        command,
+        confidence,
+    )
+
+
+def log_decision_made(mode: str, command: str, action: str | None, reason: str | None = None) -> None:
+    """Log decision engine output before execution/security gating."""
+    get_mmgi_logger().info(
+        'Decision made: mode=%s command=%s action=%s reason=%s',
+        mode,
+        command,
+        action,
+        reason,
+    )
+
+
+def log_security_check(allowed: bool, details: str) -> None:
+    """Log security authorization pass/fail checks."""
+    get_mmgi_logger().info('Security check: allowed=%s details=%s', allowed, details)
+
+
 def log_runtime_error(message: str) -> None:
     """Log runtime errors while keeping call sites concise."""
     get_mmgi_logger().error(message)

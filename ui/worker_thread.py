@@ -530,6 +530,7 @@ class WorkerThread(QThread):
             last_safety_lock_log = 0.0
             last_face_auth_signature: tuple[bool, str] | None = None
             face_lock_forced_off = False
+            face_reactivation_locked = False
             voice_backoff_until = 0.0
 
             warning_interval = 1.5
@@ -621,7 +622,7 @@ class WorkerThread(QThread):
 
                 face_authorized = True
                 face_status = face_security_manager.setup_status_text
-                if system_is_active and face_security_enabled:
+                if face_security_enabled and (system_is_active or face_reactivation_locked):
                     face_result = face_security_manager.evaluate(frame)
                     face_authorized = face_result.is_authorized
                     prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
@@ -755,10 +756,20 @@ class WorkerThread(QThread):
                 # ----------------------------------------------------------
                 # Activation manager + unified event pipeline
                 # ----------------------------------------------------------
-                should_execute = activation_manager.update(gesture)
+                gesture_for_activation = gesture
+                if face_reactivation_locked and face_security_enabled and not face_authorized:
+                    # Keep the system inactive until face auth recovers.
+                    gesture_for_activation = None
+
+                should_execute = activation_manager.update(gesture_for_activation)
                 state.set_system_active(activation_manager.is_active)
                 state.set_cooldown(activation_manager.is_in_cooldown)
                 system_is_active = activation_manager.is_active
+
+                if face_reactivation_locked and face_authorized:
+                    face_reactivation_locked = False
+                    face_lock_forced_off = False
+                    state.emit_log(_ts(), 'SECURITY', 'Face authorized again: system can be activated')
 
                 if system_is_active and face_security_enabled and not face_authorized:
                     activation_manager.force_inactive('Face not authorized')
@@ -768,7 +779,8 @@ class WorkerThread(QThread):
                     if not face_lock_forced_off:
                         state.emit_log(_ts(), 'SECURITY', 'System turned OFF: face authorization locked')
                     face_lock_forced_off = True
-                else:
+                    face_reactivation_locked = True
+                elif face_authorized:
                     face_lock_forced_off = False
 
                 pending_events = []
@@ -876,7 +888,7 @@ class WorkerThread(QThread):
                 elif time.time() < uncertainty_lock_until:
                     activation_locked = True
                     lock_reason = 'Uncertain gesture input'
-                elif system_is_active and face_security_enabled and not face_authorized:
+                elif (system_is_active or face_reactivation_locked) and face_security_enabled and not face_authorized:
                     activation_locked = True
                     lock_reason = 'Face not authorized'
                 elif gesture_verification_status != 'Stable':

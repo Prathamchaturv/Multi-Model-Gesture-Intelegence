@@ -135,6 +135,13 @@ _FACE_SECURITY_PATH = Path(__file__).parent.parent / 'config' / 'face_security.j
 _ACTION_DISPLAY_LABELS: dict[str, str] = {
     'open_brave':        'Open Browser',
     'open_apple_music':  'Open Music',
+    'open_youtube':      'Open YouTube',
+    'close_window':      'Close Window',
+    'switch_tab':        'Switch Tab',
+    'scroll_down':       'Scroll Down',
+    'left_click':        'Left Click',
+    'right_click':       'Right Click',
+    'double_click':      'Double Click',
     'next_track':        'Next Track',
     'prev_track':        'Prev Track',
     'play_pause':        'Play / Pause',
@@ -527,85 +534,27 @@ class VisionPanel(QWidget):
         feedback_frame.setStyleSheet(
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
-        fb_lay = QHBoxLayout(feedback_frame)
-        fb_lay.setContentsMargins(14, 8, 14, 8)
-        fb_lay.setSpacing(6)
+        fb_lay = QGridLayout(feedback_frame)
+        fb_lay.setContentsMargins(10, 8, 10, 8)
+        fb_lay.setHorizontalSpacing(10)
+        fb_lay.setVerticalSpacing(8)
 
-        gest_title = QLabel('DETECTED GESTURE')
-        gest_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
-        self._gesture_detected_val = QLabel('—')
-        self._gesture_detected_val.setStyleSheet(
-            f'color: {TEXT_PRI}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
-        )
+        chip_1, self._gesture_detected_val = self._make_status_chip('DETECTED GESTURE', TEXT_PRI)
+        chip_2, self._action_executed_val = self._make_status_chip('FINAL ACTION', ACTIVE)
+        chip_3, self._gesture_state_val = self._make_status_chip('GESTURE STATE', INACTIVE)
+        chip_4, self._voice_command_val = self._make_status_chip('VOICE COMMAND', MODE_MEDIA)
+        chip_5, self._activation_lock_val = self._make_status_chip('ACTIVATION LOCK', INACTIVE)
+        chip_6, self._face_auth_val = self._make_status_chip('FACE AUTH', TEXT_SEC)
 
-        sep = QLabel('|')
-        sep.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
-
-        voice_title = QLabel('VOICE COMMAND')
-        voice_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
-        self._voice_command_val = QLabel('—')
-        self._voice_command_val.setStyleSheet(
-            f'color: {MODE_MEDIA}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
-        )
-
-        sep_action = QLabel('|')
-        sep_action.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
-
-        action_title = QLabel('FINAL ACTION')
-        action_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
-        self._action_executed_val = QLabel('—')
-        self._action_executed_val.setStyleSheet(
-            f'color: {ACTIVE}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
-        )
-
-        sep_status = QLabel('|')
-        sep_status.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
-
-        gesture_status_title = QLabel('GESTURE STATE')
-        gesture_status_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
-        self._gesture_state_val = QLabel('Not Detected')
-        self._gesture_state_val.setStyleSheet(
-            f'color: {TEXT_SEC}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
-        )
-
-        sep_lock = QLabel('|')
-        sep_lock.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
-
-        lock_title = QLabel('ACTIVATION LOCK')
-        lock_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
-        self._activation_lock_val = QLabel('LOCKED')
-        self._activation_lock_val.setStyleSheet(
-            f'color: {INACTIVE}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
-        )
-
-        sep2 = QLabel('|')
-        sep2.setStyleSheet(f'color: {BORDER}; background: transparent; border: none; margin: 0 6px;')
-
-        auth_title = QLabel('FACE AUTH')
-        auth_title.setStyleSheet(f'color: {TEXT_HINT}; font-size: 10px; letter-spacing: 1px; background: transparent; border: none;')
-        self._face_auth_val = QLabel('Face Auth: Idle')
-        self._face_auth_val.setStyleSheet(
-            f'color: {TEXT_SEC}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
-        )
-
-        fb_lay.addWidget(gest_title)
-        fb_lay.addWidget(self._gesture_detected_val)
-        fb_lay.addWidget(sep)
-        fb_lay.addWidget(voice_title)
-        fb_lay.addWidget(self._voice_command_val)
-        fb_lay.addWidget(sep_action)
-        fb_lay.addWidget(action_title)
-        fb_lay.addWidget(self._action_executed_val)
-        fb_lay.addWidget(sep_status)
-        fb_lay.addWidget(gesture_status_title)
-        fb_lay.addWidget(self._gesture_state_val)
-        fb_lay.addWidget(sep_lock)
-        fb_lay.addWidget(lock_title)
-        fb_lay.addWidget(self._activation_lock_val)
-        fb_lay.addWidget(sep2)
-        fb_lay.addWidget(auth_title)
-        fb_lay.addWidget(self._face_auth_val)
-        fb_lay.addStretch()
+        fb_lay.addWidget(chip_1, 0, 0)
+        fb_lay.addWidget(chip_2, 0, 1)
+        fb_lay.addWidget(chip_3, 0, 2)
+        fb_lay.addWidget(chip_4, 1, 0)
+        fb_lay.addWidget(chip_5, 1, 1)
+        fb_lay.addWidget(chip_6, 1, 2)
+        fb_lay.setColumnStretch(0, 1)
+        fb_lay.setColumnStretch(1, 1)
+        fb_lay.setColumnStretch(2, 1)
         root.addWidget(feedback_frame)
 
         # ── Mode-switch stability bar ─────────────────────────────────
@@ -643,6 +592,40 @@ class VisionPanel(QWidget):
             f'border: 1px solid {BORDER}; border-radius: 8px; '
             f'font-size: 10px; letter-spacing: 1px; padding: 0 10px; }}'
         )
+
+    @staticmethod
+    def _compact_text(value: str, max_len: int = 26) -> str:
+        text = (value or '').strip()
+        if not text:
+            return '—'
+        if len(text) <= max_len:
+            return text
+        return text[: max_len - 1] + '…'
+
+    @staticmethod
+    def _make_status_chip(title: str, value_colour: str) -> tuple[QFrame, QLabel]:
+        chip = QFrame()
+        chip.setStyleSheet(
+            f'QFrame {{ background: rgba(138,138,160,0.08); border: 1px solid {BORDER}; border-radius: 8px; }}'
+        )
+        lay = QVBoxLayout(chip)
+        lay.setContentsMargins(10, 6, 10, 6)
+        lay.setSpacing(2)
+
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet(
+            f'color: {TEXT_HINT}; font-size: 9px; font-weight: 600; letter-spacing: 1px; '
+            f'background: transparent; border: none;'
+        )
+        value_lbl = QLabel('—')
+        value_lbl.setStyleSheet(
+            f'color: {value_colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+        )
+        value_lbl.setWordWrap(False)
+
+        lay.addWidget(title_lbl)
+        lay.addWidget(value_lbl)
+        return chip, value_lbl
 
     def _connect_state(self) -> None:
         s = self._state
@@ -703,23 +686,31 @@ class VisionPanel(QWidget):
 
     @pyqtSlot(str)
     def _on_gesture_changed(self, gesture: str) -> None:
-        self._gesture_detected_val.setText(gesture if gesture else '—')
+        text = gesture if gesture else '—'
+        self._gesture_detected_val.setText(self._compact_text(text, 22))
+        self._gesture_detected_val.setToolTip(text)
 
     @pyqtSlot(str)
     def _on_action_executed(self, action: str) -> None:
         label = _ACTION_DISPLAY_LABELS.get(action, action)
-        self._action_executed_val.setText(label if label else '—')
+        text = label if label else '—'
+        self._action_executed_val.setText(self._compact_text(text, 22))
+        self._action_executed_val.setToolTip(text)
 
     @pyqtSlot(str)
     def _on_voice_command_changed(self, command_text: str) -> None:
-        self._voice_command_val.setText(command_text if command_text else '—')
+        text = command_text if command_text else '—'
+        self._voice_command_val.setText(self._compact_text(text, 22))
+        self._voice_command_val.setToolTip(text)
 
     @pyqtSlot(bool, str)
     def _on_face_auth_changed(self, authorized: bool, status_text: str) -> None:
-        self._face_auth_val.setText(status_text if status_text else 'Face Auth: Idle')
+        full = status_text if status_text else 'Face Auth: Idle'
+        self._face_auth_val.setText(self._compact_text(full, 28))
+        self._face_auth_val.setToolTip(full)
         colour = ACTIVE if authorized else INACTIVE
         self._face_auth_val.setStyleSheet(
-            f'color: {colour}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+            f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
         )
 
     @pyqtSlot(float)
@@ -728,7 +719,9 @@ class VisionPanel(QWidget):
 
     @pyqtSlot(str)
     def _on_gesture_status_changed(self, status: str) -> None:
-        self._gesture_state_val.setText(status if status else 'Not Detected')
+        text = status if status else 'Not Detected'
+        self._gesture_state_val.setText(self._compact_text(text, 18))
+        self._gesture_state_val.setToolTip(text)
         status_lower = (status or '').lower()
         if status_lower == 'stable':
             colour = ACTIVE
@@ -742,9 +735,11 @@ class VisionPanel(QWidget):
 
     @pyqtSlot(bool, str)
     def _on_activation_lock_changed(self, locked: bool, reason: str) -> None:
-        text = f'LOCKED ({reason})' if locked else 'READY'
+        text = 'LOCKED' if locked else 'READY'
+        details = reason if reason else ('Actions blocked' if locked else 'Ready')
         colour = INACTIVE if locked else ACTIVE
         self._activation_lock_val.setText(text)
+        self._activation_lock_val.setToolTip(details)
         self._activation_lock_val.setStyleSheet(
             f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
         )
@@ -2035,8 +2030,9 @@ class SettingsPanel(QWidget):
         self._latest_preview_image = image
         if not hasattr(self, '_preview_label'):
             return
-        w = self._preview_label.width()
-        h = self._preview_label.height()
+        viewport = self._preview_label.contentsRect()
+        w = viewport.width()
+        h = viewport.height()
         if w < 8 or h < 8:
             return
         pix = QPixmap.fromImage(image).scaled(
@@ -2055,7 +2051,20 @@ class SettingsPanel(QWidget):
 
     def _build_ui(self) -> None:
         self.setStyleSheet(f'background-color: {BG_DEEP};')
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+
+        content = QWidget()
+        content.setStyleSheet(f'background-color: {BG_DEEP};')
+
+        root = QVBoxLayout(content)
         root.setContentsMargins(24, 18, 24, 18)
         root.setSpacing(10)
 
@@ -2148,6 +2157,7 @@ class SettingsPanel(QWidget):
         mode_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
         self._mode_combo = QComboBox()
         self._mode_combo.addItems(['App Mode', 'Media Mode', 'System Mode'])
+        self._mode_combo.setMinimumWidth(180)
         self._mode_combo.setStyleSheet(f"""
             QComboBox {{
                 background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
@@ -2268,7 +2278,9 @@ class SettingsPanel(QWidget):
 
         self._preview_label = QLabel('Live preview unavailable')
         self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview_label.setMinimumHeight(160)
+        self._preview_label.setFixedHeight(220)
+        self._preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._preview_label.setScaledContents(False)
         self._preview_label.setStyleSheet(
             f'background: #000; color: {TEXT_HINT}; border: 1px solid {BORDER}; border-radius: 8px;'
         )
@@ -2305,6 +2317,9 @@ class SettingsPanel(QWidget):
 
         root.addWidget(verify_card)
         root.addStretch()
+
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
     def _slider_row(
         self,

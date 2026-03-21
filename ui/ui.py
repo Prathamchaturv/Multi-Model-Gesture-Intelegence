@@ -220,7 +220,7 @@ class EventPill(QFrame):
     def __init__(self, timestamp: str, category: str, description: str) -> None:
         super().__init__()
         colour, bg = _pill_colour(category)
-        self.setFixedHeight(42)
+        self.setFixedHeight(40)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
             f'QFrame {{ background-color: {bg}; border: 1px solid {colour}33; border-radius: 21px; }}'
@@ -253,11 +253,12 @@ class ActivityLog(QWidget):
         self._state  = state
         self._count  = 0
         self._pills: list[EventPill] = []
+        self._dock_height = 96
         self._build()
         state.log_event.connect(self._on_log_event)
 
     def _build(self) -> None:
-        self.setFixedHeight(96)
+        self.setFixedHeight(self._dock_height)
         self.setStyleSheet('background: transparent;')
 
         outer = QVBoxLayout(self)
@@ -300,6 +301,13 @@ class ActivityLog(QWidget):
         self._scroll.setWidget(self._inner)
         shell_lay.addWidget(self._scroll)
         outer.addWidget(shell)
+
+    def set_dock_height(self, height: int) -> None:
+        new_height = max(64, min(140, int(height)))
+        if self._dock_height == new_height:
+            return
+        self._dock_height = new_height
+        self.setFixedHeight(self._dock_height)
 
     @pyqtSlot(str, str, str)
     def _on_log_event(self, timestamp: str, category: str, description: str) -> None:
@@ -475,6 +483,8 @@ class VisionPanel(QWidget):
         super().__init__(parent)
         self._state = state
         self._current_mode = 'App Mode'
+        self._feedback_cards: list[QWidget] = []
+        self._feedback_columns = 3
         self._build_ui()
         self._connect_state()
 
@@ -543,10 +553,10 @@ class VisionPanel(QWidget):
         feedback_frame.setStyleSheet(
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
-        fb_lay = QGridLayout(feedback_frame)
-        fb_lay.setContentsMargins(10, 8, 10, 8)
-        fb_lay.setHorizontalSpacing(10)
-        fb_lay.setVerticalSpacing(8)
+        self._feedback_grid = QGridLayout(feedback_frame)
+        self._feedback_grid.setContentsMargins(10, 8, 10, 8)
+        self._feedback_grid.setHorizontalSpacing(10)
+        self._feedback_grid.setVerticalSpacing(8)
 
         chip_1, self._gesture_detected_val = self._make_status_chip('DETECTED GESTURE', TEXT_PRI)
         chip_2, self._action_executed_val = self._make_status_chip('FINAL ACTION', ACTIVE)
@@ -555,15 +565,8 @@ class VisionPanel(QWidget):
         chip_5, self._activation_lock_val = self._make_status_chip('ACTIVATION LOCK', INACTIVE)
         chip_6, self._face_auth_val = self._make_status_chip('FACE AUTH', TEXT_SEC)
 
-        fb_lay.addWidget(chip_1, 0, 0)
-        fb_lay.addWidget(chip_2, 0, 1)
-        fb_lay.addWidget(chip_3, 0, 2)
-        fb_lay.addWidget(chip_4, 1, 0)
-        fb_lay.addWidget(chip_5, 1, 1)
-        fb_lay.addWidget(chip_6, 1, 2)
-        fb_lay.setColumnStretch(0, 1)
-        fb_lay.setColumnStretch(1, 1)
-        fb_lay.setColumnStretch(2, 1)
+        self._feedback_cards = [chip_1, chip_2, chip_3, chip_4, chip_5, chip_6]
+        self._apply_feedback_layout(columns=3)
         root.addWidget(feedback_frame)
 
         # ── Mode-switch stability bar ─────────────────────────────────
@@ -601,6 +604,26 @@ class VisionPanel(QWidget):
             f'border: 1px solid {BORDER}; border-radius: 8px; '
             f'font-size: 10px; letter-spacing: 1px; padding: 0 10px; }}'
         )
+
+    def _apply_feedback_layout(self, columns: int) -> None:
+        columns = max(1, int(columns))
+        if self._feedback_columns == columns and self._feedback_grid.count() > 0:
+            return
+
+        while self._feedback_grid.count():
+            item = self._feedback_grid.takeAt(0)
+            if item is None:
+                continue
+
+        for idx, card in enumerate(self._feedback_cards):
+            row = idx // columns
+            col = idx % columns
+            self._feedback_grid.addWidget(card, row, col)
+
+        for col in range(columns):
+            self._feedback_grid.setColumnStretch(col, 1)
+
+        self._feedback_columns = columns
 
     @staticmethod
     def _compact_text(value: str, max_len: int = 26) -> str:
@@ -759,6 +782,11 @@ class VisionPanel(QWidget):
         self._cam_frame.setStyleSheet(
             f'QFrame#cam_frame {{ background-color: #000000; border: 2px solid {colour}; border-radius: 16px; }}'
         )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        new_columns = 2 if self.width() < 980 else 3
+        self._apply_feedback_layout(columns=new_columns)
 
 
 # ===========================================================================
@@ -2689,6 +2717,7 @@ class MainWindow(QMainWindow):
         )
         self._vision    = VisionPanel(self._state)
         self._sys_panel = SystemPanel(self._state)
+        self._main_splitter = splitter
         splitter.addWidget(self._vision)
         splitter.addWidget(self._sys_panel)
         splitter.setStretchFactor(0, 5)
@@ -2734,6 +2763,7 @@ class MainWindow(QMainWindow):
         body.addWidget(self._sidebar)
         body.addWidget(content_host, stretch=1)
         root.addLayout(body, stretch=1)
+        self._apply_responsive_layout()
 
     @pyqtSlot(str)
     def _on_tab_selected(self, tab_id: str) -> None:
@@ -2904,3 +2934,25 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self._lifecycle.stop(timeout_ms=3500)
         event.accept()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_responsive_layout()
+
+    def _apply_responsive_layout(self) -> None:
+        width = self.width()
+        height = self.height()
+
+        if hasattr(self, '_activity'):
+            dock_h = 74 if height < 760 else 90
+            self._activity.set_dock_height(dock_h)
+
+        if hasattr(self, '_main_splitter'):
+            right = 340
+            if width >= 1500:
+                right = 390
+            elif width <= 1260:
+                right = 320
+            total = max(800, width - 260)
+            left = max(520, total - right)
+            self._main_splitter.setSizes([left, right])

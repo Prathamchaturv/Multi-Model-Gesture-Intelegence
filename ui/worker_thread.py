@@ -66,6 +66,7 @@ from utils.logger                import (
     get_mmgi_logger,
     log_action_executed,
     log_face_authorization_event,
+    log_frame_drop,
     log_gesture_detected,
     log_lifecycle_event,
     log_low_confidence,
@@ -536,6 +537,20 @@ class WorkerThread(QThread):
             warning_interval = 1.5
             error_interval = 1.5
 
+            frame_queue_size = max(1, int(config.get('pipeline.frame_queue_size', 4) or 4))
+            drop_stale_frames = bool(config.get('pipeline.drop_stale_frames', True))
+            max_inference_fps = max(1.0, float(config.get('pipeline.max_inference_fps', 30.0) or 30.0))
+            frame_time_budget_ms = max(1.0, float(config.get('pipeline.frame_time_budget_ms', 33.0) or 33.0))
+            latest_gesture_ttl_s = max(0.05, float(config.get('pipeline.latest_gesture_ttl_s', 0.25) or 0.25))
+
+            frame_queue: deque[tuple[float, object]] = deque(maxlen=frame_queue_size)
+            inference_interval_s = 1.0 / max_inference_fps
+            next_inference_at = time.perf_counter()
+            last_frame_drop_log = 0.0
+            latest_gesture_name: str | None = None
+            latest_gesture_confidence: float = 0.0
+            latest_gesture_ts: float = 0.0
+
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
             log_lifecycle_event('pipeline', 'started', 'Worker loop active')
@@ -546,8 +561,6 @@ class WorkerThread(QThread):
             # Frame loop
             # ----------------------------------------------------------------
             while self._running:
-                t_start = time.perf_counter()
-
                 ok, frame = camera.read_frame()
                 if not ok or frame is None:
                     continue
@@ -556,6 +569,41 @@ class WorkerThread(QThread):
                 frame = cv2.flip(frame, 1)
                 with self._frame_lock:
                     self._latest_frame_bgr = frame.copy()
+
+                queue_was_full = len(frame_queue) >= frame_queue_size
+                frame_queue.append((time.perf_counter(), frame))
+                if queue_was_full:
+                    now = time.time()
+                    if now - last_frame_drop_log >= 1.0:
+                        log_frame_drop('queue_overflow', count=1, queue_size=frame_queue_size)
+                        state.emit_log(_ts(), 'SYSTEM', 'Frame dropped: queue overflow')
+                        last_frame_drop_log = now
+
+                now_perf = time.perf_counter()
+                if now_perf < next_inference_at:
+                    continue
+
+                next_inference_at = max(next_inference_at + inference_interval_s, now_perf)
+                if not frame_queue:
+                    continue
+
+                stale_drops = 0
+                if drop_stale_frames and len(frame_queue) > 1:
+                    stale_drops = len(frame_queue) - 1
+                    _, frame = frame_queue[-1]
+                    frame_queue.clear()
+                else:
+                    _, frame = frame_queue.popleft()
+
+                if stale_drops > 0:
+                    now = time.time()
+                    if now - last_frame_drop_log >= 1.0:
+                        log_frame_drop('stale_frame', count=stale_drops, queue_size=frame_queue_size)
+                        state.emit_log(_ts(), 'SYSTEM', f'Frames dropped: stale={stale_drops}')
+                        last_frame_drop_log = now
+
+                t_start = time.perf_counter()
+                frame_deadline = t_start + (frame_time_budget_ms / 1000.0)
 
                 # ----------------------------------------------------------
                 # Voice command polling (non-blocking)
@@ -753,10 +801,38 @@ class WorkerThread(QThread):
                         state.set_landmarks(None)
                         state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
 
+                frame_over_budget = time.perf_counter() > frame_deadline
+                if frame_over_budget:
+                    now = time.time()
+                    if now - last_frame_drop_log >= 1.0:
+                        log_frame_drop('time_budget_exceeded', count=1, queue_size=frame_queue_size)
+                        state.emit_log(_ts(), 'SYSTEM', 'Frame processing skipped: time budget exceeded')
+                        last_frame_drop_log = now
+
+                if gesture_verification_status == 'Stable' and gesture is not None:
+                    latest_gesture_name = gesture
+                    latest_gesture_confidence = confidence
+                    latest_gesture_ts = time.time()
+                elif latest_gesture_name is not None and (time.time() - latest_gesture_ts) > latest_gesture_ttl_s:
+                    latest_gesture_name = None
+                    latest_gesture_confidence = 0.0
+
+                use_cached_gesture = False
+                effective_gesture = gesture
+                effective_confidence = confidence
+                if (
+                    effective_gesture is None
+                    and latest_gesture_name is not None
+                    and (time.time() - latest_gesture_ts) <= latest_gesture_ttl_s
+                ):
+                    use_cached_gesture = True
+                    effective_gesture = latest_gesture_name
+                    effective_confidence = latest_gesture_confidence
+
                 # ----------------------------------------------------------
                 # Activation manager + unified event pipeline
                 # ----------------------------------------------------------
-                gesture_for_activation = gesture
+                gesture_for_activation = effective_gesture
                 if face_reactivation_locked and face_security_enabled and not face_authorized:
                     # Keep the system inactive until face auth recovers.
                     gesture_for_activation = None
@@ -800,6 +876,8 @@ class WorkerThread(QThread):
                             last_safety_lock_log = now
                         log_runtime_error('Safety lock active due to uncertain gesture input')
                     uncertainty_lock_was_active = True
+                elif frame_over_budget:
+                    uncertainty_lock_was_active = False
                 else:
                     uncertainty_lock_was_active = False
                     if custom_action and should_execute:
@@ -809,11 +887,11 @@ class WorkerThread(QThread):
                             confidence=confidence,
                         )
                         pending_events.append((custom_event, custom_action, 'Custom Gesture'))
-                    elif gesture:
-                        if decision_engine.is_mode_switch(gesture) or should_execute:
+                    elif effective_gesture:
+                        if (not use_cached_gesture and decision_engine.is_mode_switch(effective_gesture)) or should_execute:
                             gesture_event = InputEventNormalizer.from_gesture(
-                                gesture=gesture,
-                                confidence=confidence,
+                                gesture=effective_gesture,
+                                confidence=effective_confidence,
                             )
 
                     if voice_event is not None and voice_event.command != '__unmapped__' and voice_enabled_for_fusion:
@@ -885,6 +963,9 @@ class WorkerThread(QThread):
                 if not gesture_processing_enabled:
                     activation_locked = True
                     lock_reason = 'Gesture control disabled'
+                elif frame_over_budget:
+                    activation_locked = True
+                    lock_reason = 'Frame budget exceeded'
                 elif time.time() < uncertainty_lock_until:
                     activation_locked = True
                     lock_reason = 'Uncertain gesture input'

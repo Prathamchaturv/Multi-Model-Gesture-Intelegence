@@ -486,10 +486,15 @@ class WorkerThread(QThread):
                     confirm_frames=int(config.get('adaptive_gesture.confirm_frames') or 4)
                 )
 
+            # Fast-path action gating: gesture_filter already confirms stability,
+            # so keep activation confirmation minimal and cooldown short.
+            activation_confirm_frames = max(1, int(config.get('pipeline.action_confirm_frames', 1) or 1))
+            action_cooldown_s = max(0.2, min(0.25, float(config.get('activation.cooldown_duration') or 1.0)))
+
             activation_manager = ActivationManager(
                 open_palm_duration   = profile.gesture_hold_seconds,
-                cooldown_duration    = config.get('activation.cooldown_duration'),
-                stability_threshold  = profile.stability_frames,
+                cooldown_duration    = action_cooldown_s,
+                stability_threshold  = activation_confirm_frames,
             )
 
             decision_engine = DecisionEngine(
@@ -499,7 +504,7 @@ class WorkerThread(QThread):
             )
             runtime_controller = RuntimeController(
                 min_confidence=float(config.get('hand_tracking.min_detection_confidence')),
-                cooldown_seconds=float(config.get('activation.cooldown_duration')),
+                cooldown_seconds=action_cooldown_s,
             )
             runtime_controller.set_state(RuntimeState.PAUSED, 'Waiting for stable gesture')
             state.set_runtime_state(RuntimeState.PAUSED.value, 'Waiting for stable gesture')
@@ -533,7 +538,10 @@ class WorkerThread(QThread):
             fusion_layer = MultimodalFusionLayer()
 
             fps_counter = FPSCounter()
-            gesture_filter = GestureStabilityFilter(confirm_frames=profile.stability_frames, min_switch_interval_s=0.25)
+            gesture_filter = GestureStabilityFilter(
+                confirm_frames=max(3, min(int(profile.stability_frames), 3)),
+                min_switch_interval_s=0.25,
+            )
             metrics = MetricsManager()
             last_logged_gesture: str | None = None
             last_no_hand_log = 0.0
@@ -572,6 +580,13 @@ class WorkerThread(QThread):
             latest_gesture_confidence: float = 0.0
             latest_gesture_ts: float = 0.0
             frame_index = 0
+            frame_budget_alert_active = False
+            frame_budget_overrun_streak = 0
+            frame_budget_recovery_streak = 0
+            frame_budget_trigger_streak = 6
+            frame_budget_recover_streak = 12
+            frame_budget_log_interval_s = 8.0
+            last_frame_budget_log_ts = 0.0
 
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
@@ -667,14 +682,14 @@ class WorkerThread(QThread):
                 if should_reload_calibration:
                     profile = calibration.load()
                     activation_manager._open_palm_duration = profile.gesture_hold_seconds
-                    activation_manager._stability_threshold = profile.stability_frames
+                    activation_manager._stability_threshold = activation_confirm_frames
                     decision_engine.set_runtime_timing(
                         stability_frames=profile.stability_frames,
                         hold_seconds=profile.mode_switch_hold_seconds,
                         cooldown_seconds=profile.mode_switch_cooldown_seconds,
                     )
                     mode_manager._cooldown_s = profile.mode_switch_cooldown_seconds
-                    gesture_filter.set_confirm_frames(profile.stability_frames)
+                    gesture_filter.set_confirm_frames(max(3, min(int(profile.stability_frames), 3)))
                     state.emit_log(_ts(), 'SYSTEM', 'Calibration reloaded from settings')
 
                 if state.requested_mode != mode_manager.current_mode:
@@ -686,6 +701,7 @@ class WorkerThread(QThread):
                 voice_enabled_for_fusion = bool(state.voice_listener_enabled) and voice_listener is not None and voice_listener.is_enabled
                 gesture_processing_enabled = bool(state.gesture_control_enabled)
                 face_security_enabled = bool(state.face_security_enabled)
+                runtime_face_security_active = face_security_enabled and mode_manager.current_mode == 'System Mode'
 
                 if bool(state.voice_listener_enabled) and (voice_listener is None or not voice_listener.is_enabled):
                     if time.time() >= voice_retry_at:
@@ -749,7 +765,7 @@ class WorkerThread(QThread):
                 face_authorized = True
                 face_status = face_security_manager.setup_status_text
                 latest_face_detected = True
-                if face_security_enabled and (system_is_active or face_reactivation_locked):
+                if runtime_face_security_active and (system_is_active or face_reactivation_locked):
                     try:
                         face_result = face_security_manager.evaluate(frame)
                         face_eval_failures = 0
@@ -794,9 +810,9 @@ class WorkerThread(QThread):
                                 face_eval_failures = 0
                             except Exception as reinit_exc:
                                 log_runtime_error(f'Face security recovery failed: {reinit_exc}')
-                elif system_is_active and not face_security_enabled:
+                elif system_is_active and not runtime_face_security_active:
                     face_authorized = True
-                    face_status = 'UNLOCKED | Face security disabled'
+                    face_status = 'UNLOCKED | Runtime face security inactive'
                     latest_face_detected = True
                 else:
                     face_authorized = True
@@ -947,12 +963,30 @@ class WorkerThread(QThread):
 
                 frame_over_budget = time.perf_counter() > frame_deadline
                 if frame_over_budget:
-                    now = time.time()
-                    if now - last_frame_drop_log >= 1.0:
-                        log_frame_drop('time_budget_exceeded', count=1, queue_size=frame_queue_size)
-                        log_runtime_warning('Frame processing exceeded budget; action stage may be skipped')
-                        state.emit_log(_ts(), 'SYSTEM', 'Frame processing skipped: time budget exceeded')
-                        last_frame_drop_log = now
+                    frame_budget_overrun_streak += 1
+                    frame_budget_recovery_streak = 0
+                else:
+                    frame_budget_recovery_streak += 1
+                    frame_budget_overrun_streak = 0
+
+                now_budget = time.time()
+                if (
+                    frame_budget_overrun_streak >= frame_budget_trigger_streak
+                    and not frame_budget_alert_active
+                    and (now_budget - last_frame_budget_log_ts) >= frame_budget_log_interval_s
+                ):
+                    frame_budget_alert_active = True
+                    last_frame_budget_log_ts = now_budget
+                    log_frame_drop('time_budget_exceeded', count=frame_budget_overrun_streak, queue_size=frame_queue_size)
+                    log_runtime_warning('Frame processing exceeded budget persistently')
+                    state.emit_log(_ts(), 'SYSTEM', 'Frame processing under load: adjusting in realtime')
+
+                if frame_budget_alert_active and frame_budget_recovery_streak >= frame_budget_recover_streak:
+                    frame_budget_alert_active = False
+                    if (now_budget - last_frame_budget_log_ts) >= 1.0:
+                        last_frame_budget_log_ts = now_budget
+                        state.emit_log(_ts(), 'SYSTEM', 'Frame processing stabilized')
+                        log_pipeline_state('Frame processing stabilized')
 
                 if gesture_verification_status == 'Stable' and gesture is not None:
                     latest_gesture_name = gesture
@@ -978,7 +1012,7 @@ class WorkerThread(QThread):
                 # Activation manager + unified event pipeline
                 # ----------------------------------------------------------
                 gesture_for_activation = effective_gesture
-                if face_reactivation_locked and face_security_enabled and not face_authorized:
+                if face_reactivation_locked and runtime_face_security_active and not face_authorized:
                     # Keep the system inactive until face auth recovers.
                     gesture_for_activation = None
 
@@ -992,7 +1026,7 @@ class WorkerThread(QThread):
                     face_lock_forced_off = False
                     state.emit_log(_ts(), 'SECURITY', 'Face authorized again: system can be activated')
 
-                if system_is_active and face_security_enabled and not face_authorized:
+                if system_is_active and runtime_face_security_active and not face_authorized:
                     activation_manager.force_inactive('Face not authorized')
                     should_execute = False
                     system_is_active = False
@@ -1023,11 +1057,14 @@ class WorkerThread(QThread):
                             last_safety_lock_log = now
                         log_runtime_error('Safety lock active due to uncertain gesture input')
                     uncertainty_lock_was_active = True
-                elif frame_over_budget:
-                    runtime_locked_reason = 'Frame budget exceeded'
-                    uncertainty_lock_was_active = False
                 else:
                     uncertainty_lock_was_active = False
+                    is_mode_switch_gesture = bool(
+                        effective_gesture
+                        and (not use_cached_gesture)
+                        and decision_engine.is_mode_switch(effective_gesture)
+                    )
+
                     if custom_action and should_execute:
                         # Custom gestures bypass map lookup but still use unified execution path.
                         custom_event = InputEventNormalizer.from_gesture(
@@ -1036,7 +1073,7 @@ class WorkerThread(QThread):
                         )
                         pending_events.append((custom_event, custom_action, 'Custom Gesture'))
                     elif effective_gesture:
-                        if (not use_cached_gesture and decision_engine.is_mode_switch(effective_gesture)) or should_execute:
+                        if is_mode_switch_gesture or should_execute:
                             gesture_event = InputEventNormalizer.from_gesture(
                                 gesture=effective_gesture,
                                 confidence=effective_confidence,
@@ -1064,7 +1101,7 @@ class WorkerThread(QThread):
                 if runtime_locked_reason is None:
                     if not gesture_processing_enabled:
                         runtime_locked_reason = 'Gesture control disabled'
-                    elif (system_is_active or face_reactivation_locked) and face_security_enabled and not face_authorized:
+                    elif (system_is_active or face_reactivation_locked) and runtime_face_security_active and not face_authorized:
                         runtime_locked_reason = 'Face authorization required'
                     elif gesture_verification_status != 'Stable':
                         runtime_locked_reason = 'Waiting for stable gesture'
@@ -1088,7 +1125,7 @@ class WorkerThread(QThread):
                             state.emit_log(_ts(), 'SYSTEM', f'Runtime blocked action: {blocked_reason}')
                             continue
                         if system_is_active:
-                            auth = face_security_manager.evaluate(frame) if (face_security_manager is not None and face_security_enabled) else None
+                            auth = face_security_manager.evaluate(frame) if (face_security_manager is not None and runtime_face_security_active) else None
                             if auth is not None and not auth.is_authorized:
                                 metrics.record_activation_attempt(succeeded=False)
                                 state.emit_log(_ts(), 'SECURITY', f'Blocked action while system active: {auth.status_text}')
@@ -1105,7 +1142,7 @@ class WorkerThread(QThread):
                     result = unified_pipeline.process_event(
                         event,
                         frame_bgr=frame,
-                        enforce_face_security=face_security_enabled and system_is_active,
+                        enforce_face_security=runtime_face_security_active and system_is_active,
                     )
 
                     if result.mode_changed:
@@ -1136,13 +1173,10 @@ class WorkerThread(QThread):
                 if not gesture_processing_enabled:
                     activation_locked = True
                     lock_reason = 'Gesture control disabled'
-                elif frame_over_budget:
-                    activation_locked = True
-                    lock_reason = 'Frame budget exceeded'
                 elif time.time() < uncertainty_lock_until:
                     activation_locked = True
                     lock_reason = 'Uncertain gesture input'
-                elif (system_is_active or face_reactivation_locked) and face_security_enabled and not face_authorized:
+                elif (system_is_active or face_reactivation_locked) and runtime_face_security_active and not face_authorized:
                     activation_locked = True
                     lock_reason = 'Face not authorized'
                 elif gesture_verification_status != 'Stable':
@@ -1152,16 +1186,16 @@ class WorkerThread(QThread):
 
                 low_confidence_active = bool(hand_data) and gesture_processing_enabled and confidence < low_conf_threshold
                 no_face_detected_active = (
-                    face_security_enabled
+                    runtime_face_security_active
                     and (system_is_active or face_reactivation_locked)
                     and (not latest_face_detected)
                 )
                 auth_required_active = (
-                    face_security_enabled
+                    runtime_face_security_active
                     and (system_is_active or face_reactivation_locked)
                     and (not face_authorized)
                 )
-                cooldown_active = activation_manager.is_in_cooldown
+                cooldown_active = runtime_controller.is_cooldown_active and (not activation_locked)
 
                 state.set_fail_safe_states(
                     low_confidence=low_confidence_active,

@@ -7,6 +7,9 @@ from datetime import datetime
 import json
 from pathlib import Path
 import time
+import threading
+
+from core.config_manager import ConfigManager, ConfigChange
 
 
 MODES = ('App Mode', 'Media Mode', 'System Mode')
@@ -160,12 +163,27 @@ class DecisionEngine:
         stability_frames: int = STABILITY_FRAMES,
         hold_seconds: float = HOLD_SECONDS,
         cooldown_seconds: float = COOLDOWN_SECONDS,
+        config_manager: ConfigManager | None = None,
     ):
+        """
+        Initialize DecisionEngine, optionally with user-configurable mappings.
+
+        Args:
+            config_path: Path to gesture_map.json (legacy, used if config_manager is None)
+            stability_frames: Frame stability for mode detection
+            hold_seconds: Hold time for mode detection
+            cooldown_seconds: Mode switch cooldown
+            config_manager: ConfigManager instance for runtime config updates. If None,
+                            will create a default one to enable live config reloading.
+        """
         self._mode_switch_map: dict[str, str] = {}
         self._voice_mode_switch_map: dict[str, str] = {}
         self._action_maps: dict[str, dict[str, str]] = {}
         self._voice_action_maps: dict[str, dict[str, str]] = {}
         self._action_whitelist: dict[str, set[str]] = {}
+
+        self._config_manager = config_manager or ConfigManager()
+        self._config_update_lock = threading.RLock()
 
         self.current_mode: str = DEFAULT_MODE
         self._stability_frames = max(2, int(stability_frames))
@@ -184,6 +202,11 @@ class DecisionEngine:
         self._reload_check_interval_seconds: float = 0.2
         self._load_map(self._config_path)
 
+        # Load initial mappings from ConfigManager, then subscribe to changes
+        self._load_from_config_manager()
+        self._config_manager.subscribe(self._on_config_change)
+        print('[DecisionEngine] Integrated with ConfigManager for runtime config updates')
+
     def set_runtime_timing(
         self,
         stability_frames: int | None = None,
@@ -197,6 +220,46 @@ class DecisionEngine:
             self._hold_seconds = max(0.1, float(hold_seconds))
         if cooldown_seconds is not None:
             self._cooldown_seconds = max(0.1, float(cooldown_seconds))
+
+    def _on_config_change(self, change: ConfigChange) -> None:
+        """Callback invoked when user config changes at runtime."""
+        with self._config_update_lock:
+            if change.section == 'gesture_mappings' or change.section == '*':
+                self._load_from_config_manager()
+                print(f'[DecisionEngine] Reloaded gesture mappings from user config')
+            if change.section == 'voice_mappings' or change.section == '*':
+                self._load_from_config_manager()
+                print(f'[DecisionEngine] Reloaded voice mappings from user config')
+
+    def _load_from_config_manager(self) -> None:
+        """Load gesture and voice mappings from ConfigManager."""
+        gesture_maps = self._config_manager.get('gesture_mappings', default={})
+        voice_maps = self._config_manager.get('voice_mappings', default={})
+
+        # Load gesture mappings by mode
+        for mode in MODES:
+            if mode in gesture_maps:
+                validated: dict[str, str] = {}
+                for gesture, action in gesture_maps[mode].items():
+                    if action in ALLOWED_ACTIONS:
+                        validated[gesture] = action
+                self._action_maps[mode] = validated
+
+        # Load voice mappings by mode
+        for mode in MODES:
+            if mode in voice_maps:
+                validated: dict[str, str] = {}
+                for command, action in voice_maps[mode].items():
+                    if action in ALLOWED_ACTIONS:
+                        validated[command] = action
+                self._voice_action_maps[mode] = validated
+
+        # Build action whitelist from loaded maps
+        self._action_whitelist = {}
+        for mode in MODES:
+            actions = set(self._action_maps.get(mode, {}).values())
+            actions.update(self._voice_action_maps.get(mode, {}).values())
+            self._action_whitelist[mode] = actions
 
     def process(self, gesture: str | None) -> tuple[str | None, bool]:
         """Backward-compatible gesture path used by existing callers/tests."""

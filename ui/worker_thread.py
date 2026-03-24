@@ -68,11 +68,13 @@ from utils.logger                import (
     log_action_executed,
     log_face_authorization_event,
     log_frame_drop,
+    log_frame_latency,
     log_gesture_detected,
     log_lifecycle_event,
     log_low_confidence,
     log_pipeline_state,
     log_runtime_error,
+    log_runtime_warning,
     log_voice_command_event,
 )
 from ui.shared_state             import SharedState
@@ -569,6 +571,7 @@ class WorkerThread(QThread):
             latest_gesture_name: str | None = None
             latest_gesture_confidence: float = 0.0
             latest_gesture_ts: float = 0.0
+            frame_index = 0
 
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
@@ -623,6 +626,7 @@ class WorkerThread(QThread):
                     now = time.time()
                     if now - last_frame_drop_log >= 1.0:
                         log_frame_drop('queue_overflow', count=1, queue_size=frame_queue_size)
+                        log_runtime_warning('Queue overflow detected; dropping oldest frame')
                         state.emit_log(_ts(), 'SYSTEM', 'Frame dropped: queue overflow')
                         last_frame_drop_log = now
 
@@ -646,6 +650,7 @@ class WorkerThread(QThread):
                     now = time.time()
                     if now - last_frame_drop_log >= 1.0:
                         log_frame_drop('stale_frame', count=stale_drops, queue_size=frame_queue_size)
+                        log_runtime_warning(f'Dropping stale frames: count={stale_drops}')
                         state.emit_log(_ts(), 'SYSTEM', f'Frames dropped: stale={stale_drops}')
                         last_frame_drop_log = now
 
@@ -945,6 +950,7 @@ class WorkerThread(QThread):
                     now = time.time()
                     if now - last_frame_drop_log >= 1.0:
                         log_frame_drop('time_budget_exceeded', count=1, queue_size=frame_queue_size)
+                        log_runtime_warning('Frame processing exceeded budget; action stage may be skipped')
                         state.emit_log(_ts(), 'SYSTEM', 'Frame processing skipped: time budget exceeded')
                         last_frame_drop_log = now
 
@@ -1175,6 +1181,8 @@ class WorkerThread(QThread):
                 state.set_fps(fps_counter.fps)
                 state.set_latency(latency_ms)
                 metrics.record_latency(latency_ms)
+                frame_index += 1
+                log_frame_latency(frame_index, latency_ms, fps_counter.fps, mode_manager.current_mode)
                 snap = metrics.flush_report()
                 state.set_metrics({
                     'gesture_accuracy_pct': snap.gesture_accuracy_pct,

@@ -1,0 +1,82 @@
+{
+  "gesture_mappings": {
+    "App Mode": {
+      "One Finger": "open_youtube",
+      "Two Fingers": "open_apple_music",
+      "Three Fingers": "next_mode",
+      "Pinch": "left_click"
+    },
+    "Media Mode": {
+      "One Finger": "volume_up",
+      "Two Fingers": "mute",
+      "Three Fingers": "next_mode",
+      "Four Fingers": "play_pause",
+      "Thumbs Up": "mute"
+    },
+    "System Mode": {
+      "Pinch": "left_click",
+      "Three Fingers": "next_mode",
+      "Open Palm": "scroll_down"
+    }
+  },
+  "voice_mappings": {
+    "App Mode": {
+      "open_brave": "open_brave",
+      "open_music": "open_apple_music",
+      "open_youtube": "open_youtube",
+      "close_window": "close_window",
+      "switch_tab": "switch_tab",
+      "scroll_down": "scroll_down"
+    },
+    "Media Mode": {
+      "play_song": "play_pause",
+      "pause": "play_pause",
+      "next_track": "next_track",
+      "previous_track": "prev_track",
+      "volume_up": "volume_up",
+      "volume_down": "volume_down",
+      "mute": "mute"
+    },
+    "System Mode": {
+      "open_brave": "open_brave",
+      "open_music": "open_apple_music",
+      "open_youtube": "open_youtube",
+      "close_window": "close_window",
+      "switch_tab": "switch_tab",
+      "scroll_down": "scroll_down",
+      "play_song": "play_pause",
+      "pause": "play_pause",
+      "next_track": "next_track",
+      "previous_track": "prev_track",
+      "volume_up": "volume_up",
+      "volume_down": "volume_down",
+      "mute": "mute",
+      "left_click": "left_click",
+      "right_click": "right_click"
+    }
+  },
+  "thresholds": {
+    "hand_detection_confidence": 0.8,
+    "hand_tracking_confidence": 0.5,
+    "gesture_stability_frames": 10,
+    "voice_confidence": 0.8,
+    "face_similarity": 0.84
+  },
+  "smoothing": {
+    "gesture_confirmation_frames": 4,
+    "mode_switch_hold_seconds": 1.0,
+    "activation_hold_seconds": 2.0,
+    "cooldown_seconds": 1.0,
+    "face_eval_interval_s": 0.08,
+    "voice_backoff_recovery_s": 5.0
+  },
+  "mode_switch_training": {
+    "stability_frames": 10,
+    "hold_seconds": 1.0
+  },
+  "experimental": {
+    "enable_adaptive_gestures": true,
+    "enable_face_security": true,
+    "enable_voice_control": true
+  }
+}

@@ -166,6 +166,8 @@ class MockFaceSecurityManager:
         self.face_detected = True
         self.evaluate_count = 0
         self.authorization_override = None
+        self.current_session = None
+        self.required_auth_actions = set()
     
     def set_authorization(self, authorized: bool, detected: bool = True):
         """Override authorization result."""
@@ -190,6 +192,43 @@ class MockFaceSecurityManager:
             "user_present": detected,
             "system_paused": not authorized and detected,
         }
+
+    def create_test_encoding(self):
+        """Create deterministic mock face encoding."""
+        return [0.1] * 128
+
+    def recognize_face(self, face_data):
+        """Recognize face and create session when authorized."""
+        if face_data.get("authorized"):
+            self.current_session = {
+                "authenticated": True,
+                "authorized": True,
+                "user": face_data.get("user"),
+            }
+            return self.current_session
+        return None
+
+    def create_session(self, face_data):
+        """Create session object for tests."""
+        self.current_session = {
+            "authenticated": bool(face_data.get("authorized", False)),
+            "user": face_data.get("user"),
+        }
+        return self.current_session
+
+    def expire_session(self):
+        """Expire current session."""
+        self.current_session = None
+
+    def set_user_mode(self, user):
+        """Set active user for compatibility with security tests."""
+        if self.current_session is None:
+            self.current_session = {}
+        self.current_session["user"] = user
+
+    def require_auth_for_action(self, action):
+        """Track actions that require authentication."""
+        self.required_auth_actions.add(action)
 
 
 # ===========================================================================
@@ -236,6 +275,12 @@ def spy_action_executor():
 def mock_face_security():
     """Provide mock face security manager."""
     return MockFaceSecurityManager()
+
+
+@pytest.fixture
+def face_security(mock_face_security):
+    """Backward-compatible alias expected by security-focused tests."""
+    return mock_face_security
 
 
 @pytest.fixture
@@ -305,13 +350,13 @@ def assert_action_executed(spy_executor: SpyActionExecutor, action: str, count: 
 @pytest.fixture
 def gesture_event(spy_action_executor):
     """Factory fixture for creating gesture events."""
-    def factory(gesture_name="palm_open", confidence=0.95):
+    def factory(gesture_name="palm_open", confidence=0.95, mode=None):
         return InputEvent(
             type="gesture",
             command=gesture_name,
             confidence=confidence,
             timestamp=None,
-            mode="App Mode",
+            mode=mode,
         )
     return factory
 

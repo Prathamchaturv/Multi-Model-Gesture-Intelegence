@@ -192,6 +192,60 @@ Config keys (defaults in code):
 - `pipeline.frame_time_budget_ms` (default: 33.0)
 - `pipeline.latest_gesture_ttl_s` (default: 0.25)
 
+---
+
+## User Configuration System
+
+### Overview
+MMGI now provides a runtime-configurable system that allows you to customize gesture/voice mappings, confidence thresholds, and timing parameters without modifying code or restarting.
+
+### Configuration Files
+
+#### `config/user_config.json` (User-editable)
+This is the main configuration file that you can edit to customize MMGI behavior. It stores:
+- **Gesture mappings**: per-mode gesture → action mappings
+- **Voice mappings**: per-mode voice command → action mappings
+- **Thresholds**: hand detection, tracking, and face similarity confidence
+- **Smoothing**: gesture confirmation, mode switch timing, cooldown values
+
+### ConfigManager Class
+The `ConfigManager` (in [core/config_manager.py](core/config_manager.py)) manages all user configuration:
+
+**Key Features:**
+- Load/Save: Loads `config/user_config.json` on startup; saves changes atomically
+- File Watching: Background thread detects manual file edits and reloads automatically
+- Subscribers: Components (DecisionEngine, etc.) subscribe to config changes for live updates
+- Thread-Safe: All operations protected by locks for concurrent access
+- Validation: Validates all actions against ALLOWED_ACTIONS whitelist
+
+### DecisionEngine Integration
+DecisionEngine now integrates with ConfigManager for dynamic gesture/voice mapping:
+
+```python
+from core.config_manager import ConfigManager
+from engine.decision_engine import DecisionEngine
+
+# Create and integrate ConfigManager
+config = ConfigManager()
+engine = DecisionEngine(config_manager=config)
+
+# Changes are picked up automatically — no restart required!
+config.set_gesture_mapping("App Mode", "Two Fingers", "open_youtube")
+```
+
+### Runtime Configuration Updates
+
+**Option A: Programmatic** – Call from code:
+```python
+config.set_gesture_mapping("Media Mode", "Three Fingers", "mute")
+config.set("thresholds", "hand_detection_confidence", 0.85)
+```
+
+**Option B: Manual editing** – Edit `config/user_config.json` directly, then save. ConfigManager detects changes and reloads automatically (if file watching is enabled via `config.start_watch()`).
+
+### Examples
+See [examples/config_integration_example.py](examples/config_integration_example.py) for comprehensive usage examples.
+
 ### Calibration Verification UX
 - Live camera preview in Settings (same annotated feed as Vision panel)
 - Per-gesture verification flow: Open Palm, Pinch, Three Fingers Hold

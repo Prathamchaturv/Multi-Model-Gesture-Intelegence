@@ -140,6 +140,7 @@ Default runtime format:
 
 Files:
 - logs/mmgi.log (runtime events/errors)
+- logs/mmgi_performance.log (frame latency + throughput telemetry)
 - logs/metrics_report.jsonl (periodic reliability metrics)
 
 ### Logged Event Categories
@@ -148,6 +149,11 @@ Files:
 - Voice command recognition (mapped / unmapped / error)
 - Lifecycle transitions (start/stop/restart/error)
 - Runtime errors and safety lock activations
+- Per-frame latency telemetry (frame index, latency, fps, mode)
+
+### Logging Outputs
+- Console: live INFO/WARNING/ERROR stream for operators
+- File: rotating logs for runtime and performance diagnostics
 
 ### Example Log Output
 ```text
@@ -157,6 +163,8 @@ Files:
 [19:04:14] INFO: Face auth: allowed=False status=Unknown User X similarity=0.421
 [19:04:14] WARNING: Low confidence gesture (confidence=0.53)
 [19:04:15] ERROR: Safety lock active due to uncertain gesture input
+[19:04:16] INFO mmgi.performance: Frame latency: frame=182 latency_ms=24.73 fps=29.8 mode=App Mode
+[19:04:16] WARNING mmgi.runtime: Frame drop: reason=stale_frame count=2 queue_size=4
 ```
 
 ---

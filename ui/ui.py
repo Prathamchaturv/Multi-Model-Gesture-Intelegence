@@ -548,6 +548,7 @@ class VisionPanel(QWidget):
         chip_6, self._face_auth_val = self._make_status_chip('FACE AUTH', TEXT_SEC)
         chip_7, self._failsafe_state_val = self._make_status_chip('FAIL-SAFE STATE', ACTIVE)
         chip_8, self._failsafe_feedback_val = self._make_status_chip('FAIL-SAFE FEEDBACK', TEXT_SEC)
+        chip_9, self._runtime_state_val = self._make_status_chip('RUNTIME STATE', MODE_MEDIA)
 
         fb_lay.addWidget(chip_1, 0, 0)
         fb_lay.addWidget(chip_2, 0, 1)
@@ -557,6 +558,7 @@ class VisionPanel(QWidget):
         fb_lay.addWidget(chip_6, 1, 2)
         fb_lay.addWidget(chip_7, 2, 0)
         fb_lay.addWidget(chip_8, 2, 1, 1, 2)
+        fb_lay.addWidget(chip_9, 3, 0)
         fb_lay.setColumnStretch(0, 1)
         fb_lay.setColumnStretch(1, 1)
         fb_lay.setColumnStretch(2, 1)
@@ -644,6 +646,7 @@ class VisionPanel(QWidget):
         s.gesture_status_changed.connect(self._on_gesture_status_changed)
         s.activation_lock_changed.connect(self._on_activation_lock_changed)
         s.fail_safe_state_changed.connect(self._on_fail_safe_state_changed)
+        s.runtime_state_changed.connect(self._on_runtime_state_changed)
 
     @pyqtSlot(QImage)
     def update_frame(self, image: QImage) -> None:
@@ -783,6 +786,20 @@ class VisionPanel(QWidget):
         self._failsafe_feedback_val.setToolTip(feedback)
         self._failsafe_feedback_val.setStyleSheet(
             f'color: {colour}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+        )
+
+    @pyqtSlot(str, str)
+    def _on_runtime_state_changed(self, state: str, reason: str) -> None:
+        runtime_state = (state or 'PAUSED').upper()
+        colour = {
+            'RUNNING': ACTIVE,
+            'PAUSED': MODE_MEDIA,
+            'ERROR': INACTIVE,
+        }.get(runtime_state, TEXT_SEC)
+        self._runtime_state_val.setText(runtime_state)
+        self._runtime_state_val.setToolTip(reason or runtime_state)
+        self._runtime_state_val.setStyleSheet(
+            f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
         )
 
     @pyqtSlot(bool)

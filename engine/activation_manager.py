@@ -29,7 +29,7 @@ class ActivationManager:
     STATE_ACTIVE     = 'ACTIVE'
 
     # Gestures that should never trigger an action (system-only)
-    _SYSTEM_GESTURES = frozenset({'Open Palm', 'Fist', 'Unknown', 'Thumbs Up'})
+    _SYSTEM_GESTURES = frozenset({'Open Palm', 'Fist', 'Unknown'})
 
     def __init__(
         self,

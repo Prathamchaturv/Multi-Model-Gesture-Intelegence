@@ -56,14 +56,14 @@
     }
   },
   "thresholds": {
-    "hand_detection_confidence": 0.8,
+    "hand_detection_confidence": 0.78,
     "hand_tracking_confidence": 0.5,
     "gesture_stability_frames": 10,
     "voice_confidence": 0.8,
     "face_similarity": 0.84
   },
   "smoothing": {
-    "gesture_confirmation_frames": 4,
+    "gesture_confirmation_frames": 12,
     "mode_switch_hold_seconds": 1.0,
     "activation_hold_seconds": 2.0,
     "cooldown_seconds": 1.0,

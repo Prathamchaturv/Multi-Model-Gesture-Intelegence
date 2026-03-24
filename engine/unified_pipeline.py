@@ -20,6 +20,7 @@ import time
 from core.face_security import FaceAuthResult, FaceSecurityManager
 from engine.action_executor import ActionExecutor
 from engine.decision_engine import DecisionEngine
+from engine.runtime_controller import RuntimeController
 from utils.logger import (
     log_action_executed,
     log_decision_made,
@@ -158,18 +159,22 @@ class UnifiedDecisionPipeline:
         mode_manager: ModeManager,
         face_security: FaceSecurityManager | None = None,
         conflict_resolver: InputConflictResolver | None = None,
+        runtime_controller: RuntimeController | None = None,
     ) -> None:
         self._decision_engine = decision_engine
         self._action_executor = action_executor
         self._mode_manager = mode_manager
         self._face_security = face_security
         self._conflict_resolver = conflict_resolver or InputConflictResolver()
+        self._runtime_controller = runtime_controller
 
     def process_event(self, event: InputEvent, frame_bgr=None, enforce_face_security: bool = True) -> PipelineDecision:
         """Resolve, authorize, and execute exactly one normalized input event."""
         log_input_received(event.type, event.command, event.confidence)
 
         decision = self._decision_engine.decide(event, self._mode_manager.current_mode)
+        if self._runtime_controller is not None:
+            self._runtime_controller.update_confidence(getattr(decision, 'confidence', event.confidence))
         log_decision_made(
             self._mode_manager.current_mode,
             event.command,
@@ -218,7 +223,24 @@ class UnifiedDecisionPipeline:
                     security_status=auth_result.status_text,
                 )
 
+        if self._runtime_controller is not None:
+            allowed, reason = self._runtime_controller.can_execute_action(
+                action=action,
+                face_authorized=True,
+                activation_locked=False,
+                confidence=getattr(decision, 'confidence', event.confidence),
+            )
+            if not allowed:
+                return PipelineDecision(
+                    action=None,
+                    mode_changed=False,
+                    mode=self._mode_manager.current_mode,
+                    blocked_reason=reason,
+                )
+
         self._action_executor.execute(action)
+        if self._runtime_controller is not None:
+            self._runtime_controller.mark_action_executed()
         label = self._action_executor._LABELS.get(action, action)
         log_action_executed(label)
 

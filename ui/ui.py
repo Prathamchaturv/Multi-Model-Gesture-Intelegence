@@ -118,6 +118,7 @@ from ui.worker_thread import WorkerThread
 from ui.pipeline_lifecycle import PipelineLifecycleManager
 from utils.config     import Config
 from core.calibration import CalibrationManager
+from core.config_manager import ConfigManager
 from core.adaptive_gesture_learning import (
     CustomGestureStore,
     GestureRecorder,
@@ -2011,7 +2012,7 @@ class HelpGuidePanel(QWidget):
 class SettingsPanel(QWidget):
     """Settings tab with security controls for face-based authentication."""
 
-    def __init__(self, state: SharedState, parent: QWidget | None = None) -> None:
+    def __init__(self, state: SharedState, config_manager: ConfigManager | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._state = state
         self._worker: WorkerThread | None = None
@@ -2021,9 +2022,16 @@ class SettingsPanel(QWidget):
         self._latest_preview_image: QImage | None = None
         self._verification_samples = 0
         self._verification_hits = 0
+        
+        # Initialize ConfigManager (create if not provided)
+        if config_manager is None:
+            config_manager = ConfigManager()
+        self._config_manager = config_manager
+        
         self._build_ui()
         self._connect_state()
         self._sync_ui_from_config()
+        self._subscribe_to_config_changes()
 
     def set_worker(self, worker: WorkerThread | None) -> None:
         self._worker = worker
@@ -2176,6 +2184,72 @@ class SettingsPanel(QWidget):
         runtime_lay.addLayout(mode_row)
 
         root.addWidget(runtime_card)
+
+        # ── Detection & Response Controls ──────────────────────────────
+        detection_card = QFrame()
+        detection_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        detection_lay = QVBoxLayout(detection_card)
+        detection_lay.setContentsMargins(16, 14, 16, 16)
+        detection_lay.setSpacing(10)
+
+        detection_title = QLabel('DETECTION & RESPONSE')
+        detection_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        detection_lay.addWidget(detection_title)
+        detection_lay.addWidget(_divider())
+
+        # Hand detection confidence slider
+        conf_row = QHBoxLayout()
+        conf_lbl = QLabel('Hand Detection Confidence')
+        conf_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        self._confidence_val = QLabel('0.70')
+        self._confidence_val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._confidence_val.setStyleSheet(f'color: {TEXT_PRI}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
+        conf_row.addWidget(conf_lbl)
+        conf_row.addStretch()
+        conf_row.addWidget(self._confidence_val)
+        detection_lay.addLayout(conf_row)
+
+        self._confidence_slider = QSlider(Qt.Orientation.Horizontal)
+        self._confidence_slider.setRange(50, 95)
+        self._confidence_slider.setValue(70)
+        self._confidence_slider.setSingleStep(1)
+        self._confidence_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{ background: {BORDER}; height: 5px; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {ACCENT}; width: 14px; margin: -5px 0; border-radius: 7px; }}
+            QSlider::handle:horizontal:hover {{ background: #33ffff; }}
+        """)
+        self._confidence_slider.valueChanged.connect(self._on_confidence_changed)
+        detection_lay.addWidget(self._confidence_slider)
+
+        # Gesture confirmation frames slider
+        frames_row = QHBoxLayout()
+        frames_lbl = QLabel('Gesture Confirmation Frames')
+        frames_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        self._frames_val = QLabel('5')
+        self._frames_val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._frames_val.setStyleSheet(f'color: {TEXT_PRI}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
+        frames_row.addWidget(frames_lbl)
+        frames_row.addStretch()
+        frames_row.addWidget(self._frames_val)
+        detection_lay.addLayout(frames_row)
+
+        self._frames_slider = QSlider(Qt.Orientation.Horizontal)
+        self._frames_slider.setRange(2, 20)
+        self._frames_slider.setValue(5)
+        self._frames_slider.setSingleStep(1)
+        self._frames_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{ background: {BORDER}; height: 5px; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {ACTIVE}; width: 14px; margin: -5px 0; border-radius: 7px; }}
+            QSlider::handle:horizontal:hover {{ background: #44ffaa; }}
+        """)
+        self._frames_slider.valueChanged.connect(self._on_frames_changed)
+        detection_lay.addWidget(self._frames_slider)
+
+        root.addWidget(detection_card)
 
         calib_card = QFrame()
         calib_card.setStyleSheet(
@@ -2412,6 +2486,85 @@ class SettingsPanel(QWidget):
         self._stable_value.setText(f'{int(profile.stability_frames)} f')
         self._sensitivity_value.setText(f'{profile.base_cursor_sensitivity:.1f} x')
 
+        # Load ConfigManager settings
+        self._confidence_slider.blockSignals(True)
+        self._frames_slider.blockSignals(True)
+        
+        try:
+            conf_value = self._config_manager.get('thresholds', 'hand_detection_confidence', default=0.70)
+            if conf_value is not None:
+                conf_slider_val = int(conf_value * 100)
+                self._confidence_slider.setValue(conf_slider_val)
+                self._confidence_val.setText(f'{conf_value:.2f}')
+        except Exception:
+            pass
+        
+        try:
+            frames_value = self._config_manager.get('smoothing', 'gesture_confirmation_frames', default=4)
+            if frames_value is not None:
+                frames_slider_val = int(frames_value)
+                self._frames_slider.setValue(frames_slider_val)
+                self._frames_val.setText(str(frames_slider_val))
+        except Exception:
+            pass
+        
+        self._confidence_slider.blockSignals(False)
+        self._frames_slider.blockSignals(False)
+
+    def _subscribe_to_config_changes(self) -> None:
+        """Subscribe to ConfigManager changes to update UI when config changes externally."""
+        try:
+            self._config_manager.subscribe(self._on_config_changed)
+        except Exception:
+            pass
+
+    @pyqtSlot()
+    def _on_config_changed(self, change=None) -> None:
+        """Handle ConfigManager config file changes by reloading from config."""
+        # Reload sliders from config file
+        self._confidence_slider.blockSignals(True)
+        self._frames_slider.blockSignals(True)
+        
+        try:
+            conf_value = self._config_manager.get('thresholds', 'hand_detection_confidence', default=0.70)
+            if conf_value is not None:
+                conf_slider_val = int(conf_value * 100)
+                self._confidence_slider.setValue(conf_slider_val)
+                self._confidence_val.setText(f'{conf_value:.2f}')
+        except Exception:
+            pass
+        
+        try:
+            frames_value = self._config_manager.get('smoothing', 'gesture_confirmation_frames', default=4)
+            if frames_value is not None:
+                frames_slider_val = int(frames_value)
+                self._frames_slider.setValue(frames_slider_val)
+                self._frames_val.setText(str(frames_slider_val))
+        except Exception:
+            pass
+        
+        self._confidence_slider.blockSignals(False)
+        self._frames_slider.blockSignals(False)
+
+    @pyqtSlot(int)
+    def _on_confidence_changed(self, slider_value: int) -> None:
+        """Update hand detection confidence threshold in ConfigManager."""
+        conf_float = slider_value / 100.0
+        self._confidence_val.setText(f'{conf_float:.2f}')
+        try:
+            self._config_manager.set('thresholds', 'hand_detection_confidence', conf_float)
+        except Exception as e:
+            print(f'[SettingsPanel] Failed to save confidence threshold: {e}')
+
+    @pyqtSlot(int)
+    def _on_frames_changed(self, slider_value: int) -> None:
+        """Update gesture confirmation frames in ConfigManager."""
+        self._frames_val.setText(str(slider_value))
+        try:
+            self._config_manager.set('smoothing', 'gesture_confirmation_frames', slider_value)
+        except Exception as e:
+            print(f'[SettingsPanel] Failed to save frames threshold: {e}')
+
     def _on_toggle_face_security(self, _state: int) -> None:
         self._cfg['enabled'] = self._face_toggle.isChecked()
         self._state.set_face_security_enabled(self._cfg['enabled'])
@@ -2642,6 +2795,7 @@ class MainWindow(QMainWindow):
         self._state  = SharedState(self)
         self._worker: WorkerThread | None = None
         self._lifecycle = PipelineLifecycleManager(self)
+        self._config_manager = ConfigManager()
         self._setup_window()
         self._build_ui()
         self._start_worker()
@@ -2686,7 +2840,7 @@ class MainWindow(QMainWindow):
         self._help_panel = HelpGuidePanel()
 
         # Settings tab view
-        self._settings_panel = SettingsPanel(self._state)
+        self._settings_panel = SettingsPanel(self._state, self._config_manager)
 
         # Stack: index 0 = main view, index 1 = gesture mapping, index 2 = help, index 3 = settings
         self._body_stack = QStackedWidget()

@@ -62,6 +62,8 @@ class SharedState(QObject):
     gesture_control_enabled_changed = pyqtSignal(bool)
     mode_request_changed    = pyqtSignal(str)
     activation_lock_changed = pyqtSignal(bool, str)
+    fail_safe_state_changed = pyqtSignal(str, str)
+    fail_safe_flags_changed = pyqtSignal(dict)
 
     # Batched update – emits a snapshot dict for panels that want everything
     snapshot_ready          = pyqtSignal(dict)
@@ -103,6 +105,14 @@ class SharedState(QObject):
         self._requested_mode = 'App Mode'
         self._activation_locked = True
         self._activation_lock_reason = 'Waiting for stable gesture'
+        self._fail_safe_state = 'READY'
+        self._fail_safe_message = 'System ready'
+        self._fail_safe_flags = {
+            'LOW_CONFIDENCE': False,
+            'NO_FACE_DETECTED': False,
+            'AUTH_REQUIRED': False,
+            'COOLDOWN_ACTIVE': False,
+        }
 
     # ------------------------------------------------------------------ getters
     @property
@@ -147,6 +157,12 @@ class SharedState(QObject):
     def activation_locked(self) -> bool: return self._activation_locked
     @property
     def activation_lock_reason(self) -> str: return self._activation_lock_reason
+    @property
+    def fail_safe_state(self) -> str: return self._fail_safe_state
+    @property
+    def fail_safe_message(self) -> str: return self._fail_safe_message
+    @property
+    def fail_safe_flags(self) -> dict: return dict(self._fail_safe_flags)
 
     # ------------------------------------------------------------------ setters
     def set_system_active(self, value: bool) -> None:
@@ -268,6 +284,47 @@ class SharedState(QObject):
             self._cursor_sensitivity = clamped
             self.cursor_sensitivity_changed.emit(clamped)
 
+    def set_fail_safe_states(
+        self,
+        *,
+        low_confidence: bool = False,
+        no_face_detected: bool = False,
+        auth_required: bool = False,
+        cooldown_active: bool = False,
+    ) -> None:
+        """Update fail-safe flags and broadcast the dominant user-facing safety state."""
+        new_flags = {
+            'LOW_CONFIDENCE': bool(low_confidence),
+            'NO_FACE_DETECTED': bool(no_face_detected),
+            'AUTH_REQUIRED': bool(auth_required),
+            'COOLDOWN_ACTIVE': bool(cooldown_active),
+        }
+        if new_flags != self._fail_safe_flags:
+            self._fail_safe_flags = new_flags
+            self.fail_safe_flags_changed.emit(dict(new_flags))
+
+        # Priority: authorization and detection blocks first, then cooldown, then confidence.
+        if new_flags['AUTH_REQUIRED']:
+            state_key = 'AUTH_REQUIRED'
+            message = 'Face authorization required - access blocked'
+        elif new_flags['NO_FACE_DETECTED']:
+            state_key = 'NO_FACE_DETECTED'
+            message = 'Face not detected - access blocked'
+        elif new_flags['COOLDOWN_ACTIVE']:
+            state_key = 'COOLDOWN_ACTIVE'
+            message = 'Cooldown active - wait before next action'
+        elif new_flags['LOW_CONFIDENCE']:
+            state_key = 'LOW_CONFIDENCE'
+            message = 'Low confidence - retry gesture'
+        else:
+            state_key = 'READY'
+            message = 'System ready'
+
+        if state_key != self._fail_safe_state or message != self._fail_safe_message:
+            self._fail_safe_state = state_key
+            self._fail_safe_message = message
+            self.fail_safe_state_changed.emit(state_key, message)
+
     def set_metrics(self, metrics: dict) -> None:
         """Broadcast latest lightweight performance metrics."""
         payload = {
@@ -308,6 +365,9 @@ class SharedState(QObject):
             'requested_mode': self._requested_mode,
             'activation_locked': self._activation_locked,
             'activation_lock_reason': self._activation_lock_reason,
+            'fail_safe_state': self._fail_safe_state,
+            'fail_safe_message': self._fail_safe_message,
+            'fail_safe_flags': dict(self._fail_safe_flags),
         }
 
     def _emit_snapshot(self) -> None:

@@ -172,10 +172,40 @@ Files:
 - Optional debug overlay on camera feed
 
 ### Runtime Controls (Settings)
+The Settings tab in the PyQt6 dashboard now provides interactive UI controls for system configuration:
+
+**Security Section:**
+- Enable/disable face security at runtime with toggle
+- Activate and capture authorized face from live camera feed
+
+**Runtime Controls Section:**
 - Toggle face security on/off at runtime
 - Toggle voice listener on/off at runtime
 - Toggle gesture control on/off at runtime
 - Manual mode selector (App / Media / System) for forced mode changes
+
+**Detection & Response Section** (NEW - ConfigManager Integrated):
+- **Hand Detection Confidence Slider** (0.50–0.95):
+  - Controls hand detection confidence threshold
+  - Instant update to `user_config.json` (thresholds.hand_detection_confidence)
+  - Lower values accept more hand poses; higher values are stricter
+  - Default: 0.70
+  
+- **Gesture Confirmation Frames Slider** (2–20 frames):
+  - Controls how many consecutive frames a gesture must be stable before confirmation
+  - Instant update to `user_config.json` (smoothing.gesture_confirmation_frames)
+  - Lower values = faster response; higher values = more stable/deliberate
+  - Default: 4 frames
+
+**Calibration Section:**
+- Gesture hold time, stability frames, and cursor sensitivity sliders
+- Calibration wizard for automatic hand distance estimation
+
+All slider changes are:
+- ✓ **Instantly saved** to `config/user_config.json`
+- ✓ **Immediately reflected** in the running pipeline (DecisionEngine subscribers notified)
+- ✓ **No restart required** — changes take effect instantly
+- ✓ **Thread-safe** — ConfigManager handles atomic file updates and notifications
 
 ### Latency and Backpressure Controls
 The pipeline now enforces bounded work under load:

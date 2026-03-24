@@ -79,6 +79,13 @@ class Config:
                 'volume_down': ['volume_down'],
             },
         },
+        'pipeline': {
+            'frame_queue_size': 4,
+            'drop_stale_frames': True,
+            'max_inference_fps': 30.0,
+            'frame_time_budget_ms': 33.0,
+            'latest_gesture_ttl_s': 0.25,
+        },
     }
 
     def __init__(self, config_path: str | None = None):

@@ -12,6 +12,15 @@ MMGI is an offline human-computer interaction system that converts webcam hand t
 - Execution: Central ActionExecutor (mouse, keyboard, media)
 - UI: PyQt6 dashboard with live status, activity log, and settings
 
+### Engineering Highlights
+- Real-time gesture recognition pipeline using MediaPipe landmarks, OpenCV capture, and a stabilized classifier path for reliable command intent detection.
+- Latency control with bounded backpressure (`deque(maxlen=5)` profile) plus stale-frame dropping to keep inference aligned with the latest user motion.
+- Fail-safe runtime guards including face-authorization gating, low-confidence rejection, activation lock states, and cooldown protection before action dispatch.
+- Multimodal input fusion where gesture and voice are normalized into shared events and resolved through one unified decision/execution path.
+- End-to-end execution flow: Camera -> Hand Tracking -> Gesture Classification -> DecisionEngine -> FaceSecurityManager -> ActionExecutor -> OS.
+- Runtime configurability through JSON-backed settings and live UI controls (sliders, toggles, mode selectors) without requiring code edits.
+- Operator-visible system feedback in the dashboard via SharedState signals (e.g., `LOW_CONFIDENCE`, `AUTH_REQUIRED`, `COOLDOWN`, runtime state, and activity logs).
+
 ---
 
 ## Features

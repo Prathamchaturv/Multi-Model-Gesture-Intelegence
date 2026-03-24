@@ -12,9 +12,10 @@ Tests:
 import pytest
 import time
 import gc
-import psutil
 import os
 from engine.decision_engine import InputEvent
+
+psutil = pytest.importorskip("psutil", reason="psutil is required for memory/perf stress tests")
 
 
 class TestHighFrequencyInputs:

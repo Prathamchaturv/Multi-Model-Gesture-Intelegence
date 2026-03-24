@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 
 # ===========================================================================
 # Colour tokens & global QSS  (was ui/styles.py)
@@ -254,6 +255,9 @@ class ActivityLog(QWidget):
         self._state  = state
         self._count  = 0
         self._pills: list[EventPill] = []
+        self._last_event_signature: tuple[str, str] | None = None
+        self._last_event_ts: float = 0.0
+        self._duplicate_suppression_window_s = 20.0
         self._build()
         state.log_event.connect(self._on_log_event)
 
@@ -295,6 +299,17 @@ class ActivityLog(QWidget):
 
     @pyqtSlot(str, str, str)
     def _on_log_event(self, timestamp: str, category: str, description: str) -> None:
+        # Suppress rapid duplicate events that would otherwise flood the log strip.
+        signature = (category.strip().upper(), description.strip())
+        now = time.time()
+        if (
+            self._last_event_signature == signature
+            and (now - self._last_event_ts) <= self._duplicate_suppression_window_s
+        ):
+            return
+        self._last_event_signature = signature
+        self._last_event_ts = now
+
         if len(self._pills) >= MAX_EVENTS:
             old = self._pills.pop(0)
             self._pills_lay.removeWidget(old)
@@ -479,20 +494,23 @@ class VisionPanel(QWidget):
         # ── Camera frame ──────────────────────────────────────────────
         self._cam_frame = QFrame()
         self._cam_frame.setObjectName('cam_frame')
+        self._cam_frame.setMinimumHeight(240)
+        self._cam_frame.setMaximumHeight(620)
         self._cam_frame.setStyleSheet(
             f'QFrame#cam_frame {{ background-color: #000000; border: 2px solid {BORDER}; border-radius: 16px; }}'
         )
         cam_lay = QVBoxLayout(self._cam_frame)
-        cam_lay.setContentsMargins(0, 0, 0, 0)
+        cam_lay.setContentsMargins(8, 8, 8, 8)
 
         self._video_label = QLabel()
         self._video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._video_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._video_label.setMinimumSize(480, 270)
+        self._video_label.setMinimumSize(320, 180)
         self._video_label.setText('⬤  Waiting for camera…')
         self._video_label.setStyleSheet(f'color: {TEXT_HINT}; font-size: 16px; background: transparent; border: none;')
         cam_lay.addWidget(self._video_label)
-        root.addWidget(self._cam_frame, stretch=1)
+        root.addWidget(self._cam_frame, stretch=2)
+        root.addSpacing(10)
 
         # ── Mode change banner (hidden until a mode switch fires) ─────
         self._mode_banner = QLabel('')
@@ -584,6 +602,37 @@ class VisionPanel(QWidget):
 
         root.addWidget(stab_lbl)
         root.addWidget(self._stability_bar)
+
+        # Defer first sizing pass until layout metrics are available.
+        QTimer.singleShot(0, self._sync_camera_frame_size)
+
+    def _sync_camera_frame_size(self) -> None:
+        panel_w = max(self.width(), 1)
+        panel_h = max(self.height(), 1)
+        window_h = max(self.window().height() if self.window() else panel_h, panel_h)
+
+        screen = self.screen()
+        screen_h = screen.availableGeometry().height() if screen else window_h
+
+        if screen_h < 800:
+            min_h, max_h = 210, 360
+        elif screen_h < 1050:
+            min_h, max_h = 240, 460
+        else:
+            min_h, max_h = 280, 560
+
+        content_w = max(panel_w - 56, 320)
+        by_aspect = int((content_w * 9) / 16) + 16
+        by_panel = int(min(panel_h, window_h) * 0.48)
+        target_h = max(min_h, min(max_h, min(by_aspect, by_panel)))
+
+        self._cam_frame.setMinimumHeight(min_h)
+        self._cam_frame.setMaximumHeight(max_h)
+        self._cam_frame.setFixedHeight(target_h)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_camera_frame_size()
 
     @staticmethod
     def _mode_btn_style(mode: str, active: bool = False) -> str:

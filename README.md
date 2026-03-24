@@ -177,6 +177,21 @@ Files:
 - Toggle gesture control on/off at runtime
 - Manual mode selector (App / Media / System) for forced mode changes
 
+### Latency and Backpressure Controls
+The pipeline now enforces bounded work under load:
+- Bounded frame queue to avoid unbounded memory growth
+- Stale-frame dropping to keep inference on fresh input
+- Fixed inference-rate cap (default: 30 FPS)
+- Per-frame processing budget; over-budget frames skip action stage
+- Latest stable gesture cache for short continuity across dropped/late frames
+
+Config keys (defaults in code):
+- `pipeline.frame_queue_size` (default: 4)
+- `pipeline.drop_stale_frames` (default: true)
+- `pipeline.max_inference_fps` (default: 30.0)
+- `pipeline.frame_time_budget_ms` (default: 33.0)
+- `pipeline.latest_gesture_ttl_s` (default: 0.25)
+
 ### Calibration Verification UX
 - Live camera preview in Settings (same annotated feed as Vision panel)
 - Per-gesture verification flow: Open Palm, Pinch, Three Fingers Hold

@@ -235,6 +235,21 @@ python main.py
 python main.py --headless
 ```
 
+### Dedicated CLI Headless Mode
+```bash
+python cli/main.py
+```
+
+CLI options:
+- `--mode` (app | media | system): set initial runtime mode
+- `--max-frames` (int): auto-exit after N frames (0 = run until Ctrl+C)
+
+Examples:
+```bash
+python cli/main.py --mode system
+python cli/main.py --mode media --max-frames 600
+```
+
 ---
 
 ## Controls and Commands

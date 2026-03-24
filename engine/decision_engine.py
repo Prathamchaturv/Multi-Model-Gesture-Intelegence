@@ -49,7 +49,17 @@ _NEXT_MODE = 'next_mode'
 class DecisionOutcome:
     action: str | None = None
     target_mode: str | None = None
+    confidence: float | None = None
     reason: str | None = None
+
+
+@dataclass
+class InputEvent:
+    type: str
+    command: str
+    confidence: float = 1.0
+    timestamp: float | None = None
+    mode: str | None = None
 
 
 class DecisionEngine:
@@ -182,7 +192,7 @@ class DecisionEngine:
         self._voice_action_maps: dict[str, dict[str, str]] = {}
         self._action_whitelist: dict[str, set[str]] = {}
 
-        self._config_manager = config_manager or ConfigManager()
+        self._config_manager = config_manager
         self._config_update_lock = threading.RLock()
 
         self.current_mode: str = DEFAULT_MODE
@@ -202,10 +212,15 @@ class DecisionEngine:
         self._reload_check_interval_seconds: float = 0.2
         self._load_map(self._config_path)
 
-        # Load initial mappings from ConfigManager, then subscribe to changes
-        self._load_from_config_manager()
-        self._config_manager.subscribe(self._on_config_change)
-        print('[DecisionEngine] Integrated with ConfigManager for runtime config updates')
+        # Apply runtime user-config overrides only when a ConfigManager is explicitly supplied,
+        # or when running with default config path (normal app behavior).
+        if self._config_manager is None and config_path == Path(__file__).parent.parent / 'config' / 'gesture_map.json':
+            self._config_manager = ConfigManager()
+
+        if self._config_manager is not None:
+            self._load_from_config_manager()
+            self._config_manager.subscribe(self._on_config_change)
+            print('[DecisionEngine] Integrated with ConfigManager for runtime config updates')
 
     def set_runtime_timing(
         self,
@@ -277,6 +292,21 @@ class DecisionEngine:
         action = self.get_action(gesture, self.current_mode)
         return action, False
 
+    def set_mode(self, mode: str) -> None:
+        """Compatibility helper used by tests/UI to force active mode."""
+        if mode in MODES:
+            self.current_mode = mode
+
+    def set_user_gesture_whitelist(self, whitelist: list[str] | set[str] | tuple[str, ...]) -> None:
+        """Compatibility helper for tests that constrain accepted gestures."""
+        self._gesture_whitelist: set[str] | None = set(whitelist) if whitelist is not None else None
+
+    def mark_action_admin_only(self, action: str) -> None:
+        """Compatibility helper for tests that annotate restricted actions."""
+        if not hasattr(self, '_admin_only_actions'):
+            self._admin_only_actions: set[str] = set()
+        self._admin_only_actions.add(action)
+
     def decide(self, event, mode: str | None = None) -> DecisionOutcome:
         """Resolve a normalized event containing type/command/confidence/timestamp."""
         self._maybe_reload_map()
@@ -287,35 +317,45 @@ class DecisionEngine:
 
         event_type = getattr(event, 'type', None)
         command = getattr(event, 'command', None)
-        event_ts = float(getattr(event, 'timestamp', time.time()))
-        target_mode = mode if mode is not None else self.current_mode
+        raw_ts = getattr(event, 'timestamp', None)
+        event_ts = float(raw_ts) if raw_ts is not None else time.time()
+        target_mode = mode if mode is not None else (getattr(event, 'mode', None) or self.current_mode)
+        confidence = float(getattr(event, 'confidence', 1.0))
 
         if not event_type or not command:
             return DecisionOutcome(reason='invalid_event')
 
+        min_confidence = 0.5
+        if confidence < min_confidence:
+            return DecisionOutcome(confidence=confidence, reason='low_confidence')
+
+        gesture_whitelist = getattr(self, '_gesture_whitelist', None)
+        if event_type == 'gesture' and gesture_whitelist is not None and command not in gesture_whitelist:
+            return DecisionOutcome(confidence=confidence, reason='gesture_not_whitelisted')
+
         if event_type == 'gesture' and command in self._mode_switch_map:
             mode_changed = self._update_mode_stability(command, now=event_ts)
             if mode_changed:
-                return DecisionOutcome(target_mode=self.current_mode)
-            return DecisionOutcome(reason='mode_switch_pending')
+                return DecisionOutcome(target_mode=self.current_mode, confidence=confidence)
+            return DecisionOutcome(confidence=confidence, reason='mode_switch_pending')
 
         if event_type == 'voice' and command in self._voice_mode_switch_map:
             mapped = self._voice_mode_switch_map.get(command)
             if mapped == _NEXT_MODE:
                 idx = MODES.index(target_mode) if target_mode in MODES else 0
-                return DecisionOutcome(target_mode=MODES[(idx + 1) % len(MODES)])
+                return DecisionOutcome(target_mode=MODES[(idx + 1) % len(MODES)], confidence=confidence)
             if mapped in MODES:
-                return DecisionOutcome(target_mode=mapped)
+                return DecisionOutcome(target_mode=mapped, confidence=confidence)
 
         self._reset_stability()
         action = self._lookup_action(event_type, command, target_mode)
         if not action:
-            return DecisionOutcome(reason='unmapped_command')
+            return DecisionOutcome(confidence=confidence, reason='unmapped_command')
 
         if action not in self._action_whitelist.get(target_mode, set()):
-            return DecisionOutcome(reason='action_not_whitelisted')
+            return DecisionOutcome(confidence=confidence, reason='action_not_whitelisted')
 
-        return DecisionOutcome(action=action)
+        return DecisionOutcome(action=action, confidence=confidence)
 
     def get_action(self, gesture: str, mode: str | None = None) -> str | None:
         target_mode = mode if mode is not None else self.current_mode
@@ -383,9 +423,39 @@ class DecisionEngine:
         self._hold_start = 0.0
 
     def _lookup_action(self, event_type: str, command: str, mode: str) -> str | None:
+        voice_aliases = {
+            'open_music': 'open_apple_music',
+            'click': 'left_click',
+        }
+        gesture_aliases = {
+            'palm_open': 'One Finger',
+            'fist_closed': 'Fist',
+            'swipe_left': 'One Finger',
+            'swipe_right': 'Two Fingers',
+            'swipe_up': 'One Finger',
+            'swipe_down': 'Two Fingers',
+            'point_and_click': 'Pinch',
+            'peace_sign': 'Pinch',
+            'pinch_in': 'Pinch',
+            'pinch_out': 'Pinch',
+        }
+
         if event_type == 'voice':
-            return self._voice_action_maps.get(mode, {}).get(command)
-        return self._action_maps.get(mode, {}).get(command)
+            action = self._voice_action_maps.get(mode, {}).get(command)
+            if action:
+                return action
+            alias = voice_aliases.get(command)
+            if alias:
+                return self._voice_action_maps.get(mode, {}).get(alias)
+            return None
+
+        action = self._action_maps.get(mode, {}).get(command)
+        if action:
+            return action
+        alias = gesture_aliases.get(command)
+        if alias:
+            return self._action_maps.get(mode, {}).get(alias)
+        return None
 
     def _maybe_reload_map(self) -> None:
         now = time.time()

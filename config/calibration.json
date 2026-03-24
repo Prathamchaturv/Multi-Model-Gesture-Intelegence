@@ -2,11 +2,28 @@
   "base_cursor_sensitivity": 1.0,
   "min_cursor_sensitivity": 0.6,
   "max_cursor_sensitivity": 1.8,
-  "near_hand_distance": 0.22,
-  "far_hand_distance": 0.08,
+  "near_hand_distance": 0.2904290312671447,
+  "far_hand_distance": 0.18941023778292046,
   "gesture_hold_seconds": 1.0,
   "stability_frames": 4,
   "mode_switch_hold_seconds": 1.0,
   "mode_switch_cooldown_seconds": 2.0,
-  "debug_overlay_enabled": false
+  "debug_overlay_enabled": false,
+  "gesture_thresholds": {
+    "Open Palm": {
+      "min_confidence": 0.55,
+      "required_stability_frames": 4,
+      "required_hold_seconds": 0.8
+    },
+    "Pinch": {
+      "min_confidence": 0.5,
+      "required_stability_frames": 5,
+      "required_hold_seconds": 0.7
+    },
+    "Three Fingers Hold": {
+      "min_confidence": 0.6,
+      "required_stability_frames": 6,
+      "required_hold_seconds": 1.0
+    }
+  }
 }

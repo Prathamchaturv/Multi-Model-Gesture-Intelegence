@@ -533,6 +533,7 @@ class WorkerThread(QThread):
             face_lock_forced_off = False
             face_reactivation_locked = False
             voice_backoff_until = 0.0
+            latest_face_detected = True
 
             warning_interval = 1.5
             error_interval = 1.5
@@ -670,9 +671,11 @@ class WorkerThread(QThread):
 
                 face_authorized = True
                 face_status = face_security_manager.setup_status_text
+                latest_face_detected = True
                 if face_security_enabled and (system_is_active or face_reactivation_locked):
                     face_result = face_security_manager.evaluate(frame)
                     face_authorized = face_result.is_authorized
+                    latest_face_detected = bool(face_result.face_detected)
                     prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
                     face_status = f'{prefix} | {face_result.status_text}'
                     signature = (face_result.is_authorized, face_result.status_text)
@@ -686,9 +689,11 @@ class WorkerThread(QThread):
                 elif system_is_active and not face_security_enabled:
                     face_authorized = True
                     face_status = 'UNLOCKED | Face security disabled'
+                    latest_face_detected = True
                 else:
                     face_authorized = True
                     face_status = 'Face Auth: System Inactive'
+                    latest_face_detected = True
                 state.set_face_auth(face_authorized, face_status)
 
                 # ----------------------------------------------------------
@@ -976,6 +981,26 @@ class WorkerThread(QThread):
                     activation_locked = True
                     lock_reason = 'Waiting for stable gesture'
                 state.set_activation_lock(activation_locked, lock_reason)
+
+                low_confidence_active = bool(hand_data) and gesture_processing_enabled and confidence < low_conf_threshold
+                no_face_detected_active = (
+                    face_security_enabled
+                    and (system_is_active or face_reactivation_locked)
+                    and (not latest_face_detected)
+                )
+                auth_required_active = (
+                    face_security_enabled
+                    and (system_is_active or face_reactivation_locked)
+                    and (not face_authorized)
+                )
+                cooldown_active = activation_manager.is_in_cooldown
+
+                state.set_fail_safe_states(
+                    low_confidence=low_confidence_active,
+                    no_face_detected=no_face_detected_active,
+                    auth_required=auth_required_active,
+                    cooldown_active=cooldown_active,
+                )
 
                 # ----------------------------------------------------------
                 # Update telemetry

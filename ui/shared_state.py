@@ -62,6 +62,7 @@ class SharedState(QObject):
     gesture_control_enabled_changed = pyqtSignal(bool)
     mode_request_changed    = pyqtSignal(str)
     activation_lock_changed = pyqtSignal(bool, str)
+    runtime_state_changed = pyqtSignal(str, str)
     fail_safe_state_changed = pyqtSignal(str, str)
     fail_safe_flags_changed = pyqtSignal(dict)
 
@@ -105,6 +106,8 @@ class SharedState(QObject):
         self._requested_mode = 'App Mode'
         self._activation_locked = True
         self._activation_lock_reason = 'Waiting for stable gesture'
+        self._runtime_state = 'PAUSED'
+        self._runtime_state_reason = 'Initializing'
         self._fail_safe_state = 'READY'
         self._fail_safe_message = 'System ready'
         self._fail_safe_flags = {
@@ -157,6 +160,10 @@ class SharedState(QObject):
     def activation_locked(self) -> bool: return self._activation_locked
     @property
     def activation_lock_reason(self) -> str: return self._activation_lock_reason
+    @property
+    def runtime_state(self) -> str: return self._runtime_state
+    @property
+    def runtime_state_reason(self) -> str: return self._runtime_state_reason
     @property
     def fail_safe_state(self) -> str: return self._fail_safe_state
     @property
@@ -277,6 +284,16 @@ class SharedState(QObject):
         if changed:
             self.activation_lock_changed.emit(new_locked, new_reason)
 
+    def set_runtime_state(self, state: str, reason: str) -> None:
+        """Broadcast coarse runtime lifecycle state (RUNNING/PAUSED/ERROR)."""
+        new_state = str(state).upper()
+        new_reason = str(reason)
+        changed = new_state != self._runtime_state or new_reason != self._runtime_state_reason
+        self._runtime_state = new_state
+        self._runtime_state_reason = new_reason
+        if changed:
+            self.runtime_state_changed.emit(new_state, new_reason)
+
     def set_cursor_sensitivity(self, value: float) -> None:
         """Broadcast dynamic cursor sensitivity from calibration policy."""
         clamped = round(max(0.1, min(3.0, float(value))), 2)
@@ -365,6 +382,8 @@ class SharedState(QObject):
             'requested_mode': self._requested_mode,
             'activation_locked': self._activation_locked,
             'activation_lock_reason': self._activation_lock_reason,
+            'runtime_state': self._runtime_state,
+            'runtime_state_reason': self._runtime_state_reason,
             'fail_safe_state': self._fail_safe_state,
             'fail_safe_message': self._fail_safe_message,
             'fail_safe_flags': dict(self._fail_safe_flags),

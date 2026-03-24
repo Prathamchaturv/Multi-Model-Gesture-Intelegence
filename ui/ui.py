@@ -546,6 +546,8 @@ class VisionPanel(QWidget):
         chip_4, self._voice_command_val = self._make_status_chip('VOICE COMMAND', MODE_MEDIA)
         chip_5, self._activation_lock_val = self._make_status_chip('ACTIVATION LOCK', INACTIVE)
         chip_6, self._face_auth_val = self._make_status_chip('FACE AUTH', TEXT_SEC)
+        chip_7, self._failsafe_state_val = self._make_status_chip('FAIL-SAFE STATE', ACTIVE)
+        chip_8, self._failsafe_feedback_val = self._make_status_chip('FAIL-SAFE FEEDBACK', TEXT_SEC)
 
         fb_lay.addWidget(chip_1, 0, 0)
         fb_lay.addWidget(chip_2, 0, 1)
@@ -553,6 +555,8 @@ class VisionPanel(QWidget):
         fb_lay.addWidget(chip_4, 1, 0)
         fb_lay.addWidget(chip_5, 1, 1)
         fb_lay.addWidget(chip_6, 1, 2)
+        fb_lay.addWidget(chip_7, 2, 0)
+        fb_lay.addWidget(chip_8, 2, 1, 1, 2)
         fb_lay.setColumnStretch(0, 1)
         fb_lay.setColumnStretch(1, 1)
         fb_lay.setColumnStretch(2, 1)
@@ -639,6 +643,7 @@ class VisionPanel(QWidget):
         s.voice_command_changed.connect(self._on_voice_command_changed)
         s.gesture_status_changed.connect(self._on_gesture_status_changed)
         s.activation_lock_changed.connect(self._on_activation_lock_changed)
+        s.fail_safe_state_changed.connect(self._on_fail_safe_state_changed)
 
     @pyqtSlot(QImage)
     def update_frame(self, image: QImage) -> None:
@@ -744,6 +749,40 @@ class VisionPanel(QWidget):
         self._activation_lock_val.setToolTip(details)
         self._activation_lock_val.setStyleSheet(
             f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+        )
+
+    @pyqtSlot(str, str)
+    def _on_fail_safe_state_changed(self, state_key: str, message: str) -> None:
+        state = (state_key or 'READY').upper()
+        feedback = message or 'System ready'
+        colour_by_state = {
+            'LOW_CONFIDENCE': MODE_SYSTEM,
+            'NO_FACE_DETECTED': INACTIVE,
+            'AUTH_REQUIRED': INACTIVE,
+            'COOLDOWN_ACTIVE': MODE_MEDIA,
+            'READY': ACTIVE,
+        }
+        label_by_state = {
+            'LOW_CONFIDENCE': 'LOW CONFIDENCE',
+            'NO_FACE_DETECTED': 'NO FACE DETECTED',
+            'AUTH_REQUIRED': 'AUTH REQUIRED',
+            'COOLDOWN_ACTIVE': 'COOLDOWN ACTIVE',
+            'READY': 'READY',
+        }
+
+        colour = colour_by_state.get(state, TEXT_SEC)
+        state_label = label_by_state.get(state, state)
+
+        self._failsafe_state_val.setText(state_label)
+        self._failsafe_state_val.setToolTip(feedback)
+        self._failsafe_state_val.setStyleSheet(
+            f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+        )
+
+        self._failsafe_feedback_val.setText(self._compact_text(feedback, 38))
+        self._failsafe_feedback_val.setToolTip(feedback)
+        self._failsafe_feedback_val.setStyleSheet(
+            f'color: {colour}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
         )
 
     @pyqtSlot(bool)

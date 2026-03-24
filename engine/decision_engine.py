@@ -251,6 +251,11 @@ class DecisionEngine:
         gesture_maps = self._config_manager.get('gesture_mappings', default={})
         voice_maps = self._config_manager.get('voice_mappings', default={})
 
+        # Preserve file/default mappings and allow user config to override keys only.
+        merged_action_maps = {mode: dict(self._action_maps.get(mode, {})) for mode in MODES}
+        merged_voice_maps = {mode: dict(self._voice_action_maps.get(mode, {})) for mode in MODES}
+        merged_whitelist = {mode: set(self._action_whitelist.get(mode, set())) for mode in MODES}
+
         # Load gesture mappings by mode
         for mode in MODES:
             if mode in gesture_maps:
@@ -258,7 +263,8 @@ class DecisionEngine:
                 for gesture, action in gesture_maps[mode].items():
                     if action in ALLOWED_ACTIONS:
                         validated[gesture] = action
-                self._action_maps[mode] = validated
+                merged_action_maps[mode].update(validated)
+                merged_whitelist[mode].update(validated.values())
 
         # Load voice mappings by mode
         for mode in MODES:
@@ -267,14 +273,12 @@ class DecisionEngine:
                 for command, action in voice_maps[mode].items():
                     if action in ALLOWED_ACTIONS:
                         validated[command] = action
-                self._voice_action_maps[mode] = validated
+                merged_voice_maps[mode].update(validated)
+                merged_whitelist[mode].update(validated.values())
 
-        # Build action whitelist from loaded maps
-        self._action_whitelist = {}
-        for mode in MODES:
-            actions = set(self._action_maps.get(mode, {}).values())
-            actions.update(self._voice_action_maps.get(mode, {}).values())
-            self._action_whitelist[mode] = actions
+        self._action_maps = merged_action_maps
+        self._voice_action_maps = merged_voice_maps
+        self._action_whitelist = merged_whitelist
 
     def process(self, gesture: str | None) -> tuple[str | None, bool]:
         """Backward-compatible gesture path used by existing callers/tests."""

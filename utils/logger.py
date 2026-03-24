@@ -18,11 +18,14 @@ from pathlib import Path
 from queue import Queue
 
 LOGGER_NAME = 'mmgi.runtime'
+PERF_LOGGER_NAME = 'mmgi.performance'
 LOG_FILENAME = 'mmgi.log'
+PERF_LOG_FILENAME = 'mmgi_performance.log'
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_BACKUP_COUNT = 3
 
 _mmgi_logger: logging.Logger | None = None
+_performance_logger: logging.Logger | None = None
 _log_listener: logging.handlers.QueueListener | None = None
 
 
@@ -31,6 +34,13 @@ def _log_file_path() -> Path:
     log_dir = Path(__file__).parent.parent / 'logs'
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / LOG_FILENAME
+
+
+def _performance_log_file_path() -> Path:
+    """Return the canonical performance log file path (and ensure parent exists)."""
+    log_dir = Path(__file__).parent.parent / 'logs'
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir / PERF_LOG_FILENAME
 
 
 def _build_file_handler() -> logging.Handler:
@@ -48,6 +58,38 @@ def _build_file_handler() -> logging.Handler:
     return file_handler
 
 
+def _build_performance_file_handler() -> logging.Handler:
+    """Create rotating file handler dedicated to frame/performance telemetry."""
+    perf_handler = logging.handlers.RotatingFileHandler(
+        str(_performance_log_file_path()),
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding='utf-8',
+    )
+    perf_handler.setLevel(logging.INFO)
+    perf_handler.addFilter(lambda record: record.name.startswith(PERF_LOGGER_NAME))
+    perf_handler.setFormatter(
+        logging.Formatter(
+            '[%(asctime)s] %(levelname)s %(name)s: %(message)s',
+            datefmt='%H:%M:%S',
+        )
+    )
+    return perf_handler
+
+
+def _build_console_handler() -> logging.Handler:
+    """Create console handler for local observability while developing/running MMGI."""
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(
+        logging.Formatter(
+            '[%(asctime)s] %(levelname)s %(name)s: %(message)s',
+            datefmt='%H:%M:%S',
+        )
+    )
+    return console_handler
+
+
 def _build_mmgi_logger() -> logging.Logger:
     """Initialise and return the process-wide asynchronous MMGI logger."""
     global _log_listener
@@ -62,10 +104,14 @@ def _build_mmgi_logger() -> logging.Logger:
     log_record_queue: Queue = Queue(-1)
     queue_handler = logging.handlers.QueueHandler(log_record_queue)
     file_handler = _build_file_handler()
+    perf_file_handler = _build_performance_file_handler()
+    console_handler = _build_console_handler()
 
     _log_listener = logging.handlers.QueueListener(
         log_record_queue,
         file_handler,
+        perf_file_handler,
+        console_handler,
         respect_handler_level=True,
     )
     _log_listener.start()
@@ -92,8 +138,19 @@ def get_mmgi_logger() -> logging.Logger:
 
 
 def get_performance_logger() -> logging.Logger:
-    """Backward-compatible alias retained for existing callers."""
-    return get_mmgi_logger()
+    """Return singleton logger dedicated to performance telemetry."""
+    global _performance_logger
+    if _performance_logger is None:
+        get_mmgi_logger()  # ensure queue listener is initialized
+        logger = logging.getLogger(PERF_LOGGER_NAME)
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        if not logger.handlers:
+            queue_logger = get_mmgi_logger()
+            for handler in queue_logger.handlers:
+                logger.addHandler(handler)
+        _performance_logger = logger
+    return _performance_logger
 
 
 def log_gesture_detected(gesture_name: str) -> None:
@@ -175,6 +232,11 @@ def log_runtime_error(message: str) -> None:
     get_mmgi_logger().error(message)
 
 
+def log_runtime_warning(message: str) -> None:
+    """Log runtime warnings while keeping call sites concise."""
+    get_mmgi_logger().warning(message)
+
+
 def log_frame_drop(reason: str, count: int = 1, queue_size: int | None = None) -> None:
     """Log frame drops caused by queue overflow, stale-drop, or budget pressure."""
     if queue_size is None:
@@ -185,4 +247,15 @@ def log_frame_drop(reason: str, count: int = 1, queue_size: int | None = None) -
         reason,
         count,
         queue_size,
+    )
+
+
+def log_frame_latency(frame_index: int, latency_ms: float, fps: float, mode: str) -> None:
+    """Log per-frame processing latency for performance monitoring."""
+    get_performance_logger().info(
+        'Frame latency: frame=%d latency_ms=%.2f fps=%.1f mode=%s',
+        frame_index,
+        latency_ms,
+        fps,
+        mode,
     )

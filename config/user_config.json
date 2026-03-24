@@ -1,14 +1,14 @@
 {
   "gesture_mappings": {
     "App Mode": {
-      "One Finger": "open_youtube",
+      "One Finger": "open_brave",
       "Two Fingers": "open_apple_music",
       "Three Fingers": "next_mode",
       "Pinch": "left_click"
     },
     "Media Mode": {
       "One Finger": "volume_up",
-      "Two Fingers": "mute",
+      "Two Fingers": "volume_down",
       "Three Fingers": "next_mode",
       "Four Fingers": "play_pause",
       "Thumbs Up": "mute"
@@ -29,6 +29,7 @@
       "scroll_down": "scroll_down"
     },
     "Media Mode": {
+      "open_youtube": "open_youtube",
       "play_song": "play_pause",
       "pause": "play_pause",
       "next_track": "next_track",

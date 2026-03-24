@@ -55,6 +55,7 @@ from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
 from engine.metrics_manager      import MetricsManager
 from engine.multimodal_fusion    import MultimodalFusionLayer
+from engine.runtime_controller    import RuntimeController, RuntimeState
 from engine.unified_pipeline     import (
     InputEventNormalizer,
     ModeManager,
@@ -429,6 +430,7 @@ class WorkerThread(QThread):
             state.set_voice_listener_enabled(voice_enabled_for_fusion)
             state.set_voice_command('Listening...' if voice_enabled_for_fusion else 'Voice Unavailable')
             last_voice_error: str | None = None
+            voice_retry_at = 0.0
 
             camera = Camera(
                 width  = config.get('camera.width'),
@@ -437,6 +439,8 @@ class WorkerThread(QThread):
             )
             camera_retry_attempts = int(config.get('lifecycle.camera_retry_attempts', 3) or 3)
             camera_retry_delay_s = float(config.get('lifecycle.camera_retry_delay_s', 1.0) or 1.0)
+            runtime_camera_retry_delay_s = 2.0
+            camera_failure_threshold = 8
             camera_opened = False
             for attempt in range(1, camera_retry_attempts + 1):
                 if camera.open():
@@ -448,8 +452,9 @@ class WorkerThread(QThread):
 
             if not camera_opened:
                 log_lifecycle_event('camera_init', 'failed', 'All retry attempts exhausted')
-                self.error.emit('Could not open camera.')
-                return
+                log_runtime_error('Camera unavailable at startup, entering recovery mode')
+                state.emit_log(_ts(), 'ERROR', 'Camera unavailable at startup - retrying in background')
+                state.set_runtime_state(RuntimeState.ERROR.value, 'Camera unavailable - retrying')
 
             hand_tracker = HandTracker(
                 max_num_hands            = config.get('hand_tracking.max_num_hands'),
@@ -490,6 +495,12 @@ class WorkerThread(QThread):
                 hold_seconds=profile.mode_switch_hold_seconds,
                 cooldown_seconds=profile.mode_switch_cooldown_seconds,
             )
+            runtime_controller = RuntimeController(
+                min_confidence=float(config.get('hand_tracking.min_detection_confidence')),
+                cooldown_seconds=float(config.get('activation.cooldown_duration')),
+            )
+            runtime_controller.set_state(RuntimeState.PAUSED, 'Waiting for stable gesture')
+            state.set_runtime_state(RuntimeState.PAUSED.value, 'Waiting for stable gesture')
             mode_manager = ModeManager(cooldown_s=profile.mode_switch_cooldown_seconds, initial_mode=decision_engine.current_mode)
             face_security_cfg = _load_face_security_settings(config)
             face_security_manager = FaceSecurityManager(
@@ -515,6 +526,7 @@ class WorkerThread(QThread):
                 action_executor=action_executor,
                 mode_manager=mode_manager,
                 face_security=face_security_manager,
+                runtime_controller=runtime_controller,
             )
             fusion_layer = MultimodalFusionLayer()
 
@@ -534,6 +546,12 @@ class WorkerThread(QThread):
             face_reactivation_locked = False
             voice_backoff_until = 0.0
             latest_face_detected = True
+            face_eval_failures = 0
+            face_recovery_retry_at = 0.0
+            model_failures = 0
+            model_recovery_retry_at = 0.0
+            camera_read_failures = 0
+            camera_recovery_retry_at = 0.0
 
             warning_interval = 1.5
             error_interval = 1.5
@@ -564,7 +582,35 @@ class WorkerThread(QThread):
             while self._running:
                 ok, frame = camera.read_frame()
                 if not ok or frame is None:
+                    camera_read_failures += 1
+                    if camera_read_failures >= camera_failure_threshold and time.time() >= camera_recovery_retry_at:
+                        camera_recovery_retry_at = time.time() + runtime_camera_retry_delay_s
+                        state.set_runtime_state(RuntimeState.ERROR.value, 'Camera unavailable - retrying')
+                        state.set_gesture('Camera unavailable - retrying')
+                        state.emit_log(_ts(), 'ERROR', 'Camera frame read failed, attempting recovery')
+                        log_runtime_error('Camera frame read failed, attempting recovery')
+                        try:
+                            camera.release()
+                        except Exception:
+                            pass
+
+                        reopened = False
+                        for attempt in range(1, camera_retry_attempts + 1):
+                            try:
+                                if camera.open():
+                                    reopened = True
+                                    break
+                            except Exception as exc:
+                                log_runtime_error(f'Camera reopen exception (attempt {attempt}): {exc}')
+                            time.sleep(min(0.3, camera_retry_delay_s))
+
+                        if reopened:
+                            camera_read_failures = 0
+                            state.emit_log(_ts(), 'SYSTEM', 'Camera recovered successfully')
+                            state.set_runtime_state(RuntimeState.PAUSED.value, 'Camera recovered - waiting for stable gesture')
+                    time.sleep(0.03)
                     continue
+                camera_read_failures = 0
 
                 # Mirror for natural interaction
                 frame = cv2.flip(frame, 1)
@@ -636,6 +682,31 @@ class WorkerThread(QThread):
                 gesture_processing_enabled = bool(state.gesture_control_enabled)
                 face_security_enabled = bool(state.face_security_enabled)
 
+                if bool(state.voice_listener_enabled) and (voice_listener is None or not voice_listener.is_enabled):
+                    if time.time() >= voice_retry_at:
+                        voice_retry_at = time.time() + 8.0
+                        state.set_voice_command('Mic unavailable - retrying...')
+                        state.emit_log(_ts(), 'ERROR', 'Microphone unavailable, retrying voice listener')
+                        log_runtime_error('Microphone unavailable, retrying voice listener')
+                        try:
+                            if voice_listener is not None:
+                                voice_listener.stop()
+                        except Exception:
+                            pass
+                        try:
+                            voice_listener = VoiceCommandListener(
+                                enabled=bool(voice_cfg.get('enabled', True)),
+                                listen_timeout_s=float(voice_cfg.get('listen_timeout_s', 1.2)),
+                                phrase_time_limit_s=float(voice_cfg.get('phrase_time_limit_s', 2.0)),
+                                energy_threshold=int(voice_cfg.get('energy_threshold', 250)),
+                                recognition_language=str(voice_cfg.get('recognition_language', 'en-IN')),
+                            )
+                            voice_listener.start()
+                            if voice_listener.is_enabled:
+                                state.set_voice_command('Listening...')
+                        except Exception as exc:
+                            log_runtime_error(f'Voice listener restart failed: {exc}')
+
                 voice_event = None
                 if voice_listener is not None and voice_enabled_for_fusion:
                     voice_event = voice_listener.poll_latest()
@@ -659,6 +730,7 @@ class WorkerThread(QThread):
                     elif voice_listener.last_error and voice_listener.last_error != last_voice_error:
                         last_voice_error = voice_listener.last_error
                         voice_backoff_until = time.time() + 5.0
+                        voice_retry_at = max(voice_retry_at, time.time() + 5.0)
                         state.set_voice_command(f'Voice Error: {last_voice_error}')
                         log_voice_command_event('voice_error', mapped=False, details=last_voice_error)
                         state.emit_log(_ts(), 'SYSTEM', f'Voice listener error: {last_voice_error}')
@@ -673,19 +745,50 @@ class WorkerThread(QThread):
                 face_status = face_security_manager.setup_status_text
                 latest_face_detected = True
                 if face_security_enabled and (system_is_active or face_reactivation_locked):
-                    face_result = face_security_manager.evaluate(frame)
-                    face_authorized = face_result.is_authorized
-                    latest_face_detected = bool(face_result.face_detected)
-                    prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
-                    face_status = f'{prefix} | {face_result.status_text}'
-                    signature = (face_result.is_authorized, face_result.status_text)
-                    if signature != last_face_auth_signature:
-                        last_face_auth_signature = signature
-                        log_face_authorization_event(
-                            face_result.is_authorized,
-                            face_result.status_text,
-                            face_result.similarity,
-                        )
+                    try:
+                        face_result = face_security_manager.evaluate(frame)
+                        face_eval_failures = 0
+                        face_authorized = face_result.is_authorized
+                        latest_face_detected = bool(face_result.face_detected)
+                        prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
+                        face_status = f'{prefix} | {face_result.status_text}'
+                        signature = (face_result.is_authorized, face_result.status_text)
+                        if signature != last_face_auth_signature:
+                            last_face_auth_signature = signature
+                            log_face_authorization_event(
+                                face_result.is_authorized,
+                                face_result.status_text,
+                                face_result.similarity,
+                            )
+                    except Exception as exc:
+                        face_eval_failures += 1
+                        face_authorized = False
+                        latest_face_detected = False
+                        face_status = 'LOCKED | Face detection failure - access blocked'
+                        state.emit_log(_ts(), 'ERROR', 'Face detection failure, access blocked')
+                        log_runtime_error(f'Face detection failure: {exc}')
+                        if face_eval_failures >= 3 and time.time() >= face_recovery_retry_at:
+                            face_recovery_retry_at = time.time() + 2.0
+                            try:
+                                if face_security_manager is not None:
+                                    face_security_manager.close()
+                            except Exception:
+                                pass
+                            try:
+                                face_security_manager = FaceSecurityManager(
+                                    enabled=bool(face_security_cfg.get('enabled', True)),
+                                    authorized_image_path=str(face_security_cfg.get('authorized_image_path', 'config/authorized_face.jpg')),
+                                    authorized_encoding_path=str(face_security_cfg.get('authorized_encoding_path', 'config/authorized_face_encoding.json')),
+                                    similarity_threshold=float(face_security_cfg.get('similarity_threshold', 0.84)),
+                                    min_detection_confidence=float(face_security_cfg.get('min_detection_confidence', 0.6)),
+                                    eval_interval_s=float(face_security_cfg.get('eval_interval_s', 0.08)),
+                                    away_delay_s=float(face_security_cfg.get('away_delay_s', 2.5)),
+                                    return_confirm_s=float(face_security_cfg.get('return_confirm_s', 0.7)),
+                                )
+                                state.emit_log(_ts(), 'SYSTEM', 'Face security recovered')
+                                face_eval_failures = 0
+                            except Exception as reinit_exc:
+                                log_runtime_error(f'Face security recovery failed: {reinit_exc}')
                 elif system_is_active and not face_security_enabled:
                     face_authorized = True
                     face_status = 'UNLOCKED | Face security disabled'
@@ -703,8 +806,33 @@ class WorkerThread(QThread):
                 detection_result = None
                 hands_info = {}
                 if not skip_hand_processing:
-                    detection_result = hand_tracker.detect_hands(frame)
-                    hands_info = hand_tracker.get_hands_info(detection_result)
+                    try:
+                        detection_result = hand_tracker.detect_hands(frame)
+                        hands_info = hand_tracker.get_hands_info(detection_result)
+                    except Exception as exc:
+                        model_failures += 1
+                        state.emit_log(_ts(), 'ERROR', 'Gesture model failure - recovering')
+                        log_runtime_error(f'Gesture model detection failure: {exc}')
+                        state.set_runtime_state(RuntimeState.PAUSED.value, 'Gesture model recovering')
+                        detection_result = None
+                        hands_info = {}
+                        if model_failures >= 3 and time.time() >= model_recovery_retry_at:
+                            model_recovery_retry_at = time.time() + 2.0
+                            try:
+                                hand_tracker.close()
+                            except Exception:
+                                pass
+                            try:
+                                hand_tracker = HandTracker(
+                                    max_num_hands=config.get('hand_tracking.max_num_hands'),
+                                    min_detection_confidence=config.get('hand_tracking.min_detection_confidence'),
+                                    min_tracking_confidence=config.get('hand_tracking.min_tracking_confidence'),
+                                )
+                                gesture_classifier = GestureClassifier()
+                                model_failures = 0
+                                state.emit_log(_ts(), 'SYSTEM', 'Gesture model recovered')
+                            except Exception as reinit_exc:
+                                log_runtime_error(f'Gesture model recovery failed: {reinit_exc}')
 
                 gesture: str | None = None
                 confidence          = 0.0
@@ -750,7 +878,13 @@ class WorkerThread(QThread):
 
                         if custom_action is None:
                             finger_states = hand_data['finger_states']
-                            raw_gesture = gesture_classifier.classify(finger_states)
+                            try:
+                                raw_gesture = gesture_classifier.classify(finger_states)
+                            except Exception as exc:
+                                model_failures += 1
+                                raw_gesture = 'Unknown'
+                                state.emit_log(_ts(), 'ERROR', 'Gesture classification failure - using safe fallback')
+                                log_runtime_error(f'Gesture classification failure: {exc}')
                             if raw_gesture == 'Unknown':
                                 uncertainty_streak += 1
                                 gesture, _ = gesture_filter.update(None, hand_present=True)
@@ -873,7 +1007,9 @@ class WorkerThread(QThread):
                     uncertainty_streak = 0
 
                 lock_active = time.time() < uncertainty_lock_until
+                runtime_locked_reason = None
                 if lock_active:
+                    runtime_locked_reason = 'Uncertain gesture input'
                     if not uncertainty_lock_was_active:
                         now = time.time()
                         if now - last_safety_lock_log >= 6.0:
@@ -882,6 +1018,7 @@ class WorkerThread(QThread):
                         log_runtime_error('Safety lock active due to uncertain gesture input')
                     uncertainty_lock_was_active = True
                 elif frame_over_budget:
+                    runtime_locked_reason = 'Frame budget exceeded'
                     uncertainty_lock_was_active = False
                 else:
                     uncertainty_lock_was_active = False
@@ -918,8 +1055,32 @@ class WorkerThread(QThread):
                         label = 'Voice' if fused_event.type == 'voice' else mode_manager.current_mode
                         pending_events.append((fused_event, None, label))
 
+                if runtime_locked_reason is None:
+                    if not gesture_processing_enabled:
+                        runtime_locked_reason = 'Gesture control disabled'
+                    elif (system_is_active or face_reactivation_locked) and face_security_enabled and not face_authorized:
+                        runtime_locked_reason = 'Face authorization required'
+                    elif gesture_verification_status != 'Stable':
+                        runtime_locked_reason = 'Waiting for stable gesture'
+
+                if runtime_locked_reason:
+                    runtime_controller.set_state(RuntimeState.PAUSED, runtime_locked_reason)
+                    state.set_runtime_state(RuntimeState.PAUSED.value, runtime_locked_reason)
+                else:
+                    runtime_controller.set_state(RuntimeState.RUNNING, 'Runtime healthy')
+                    state.set_runtime_state(RuntimeState.RUNNING.value, 'Runtime healthy')
+
                 for event, forced_action, source_label in pending_events:
                     if forced_action is not None:
+                        allowed, blocked_reason = runtime_controller.can_execute_action(
+                            action=forced_action,
+                            face_authorized=face_authorized,
+                            activation_locked=bool(runtime_locked_reason),
+                            confidence=confidence,
+                        )
+                        if not allowed:
+                            state.emit_log(_ts(), 'SYSTEM', f'Runtime blocked action: {blocked_reason}')
+                            continue
                         if system_is_active:
                             auth = face_security_manager.evaluate(frame) if (face_security_manager is not None and face_security_enabled) else None
                             if auth is not None and not auth.is_authorized:
@@ -927,6 +1088,7 @@ class WorkerThread(QThread):
                                 state.emit_log(_ts(), 'SECURITY', f'Blocked action while system active: {auth.status_text}')
                                 continue
                         action_executor.execute(forced_action)
+                        runtime_controller.mark_action_executed()
                         metrics.record_activation_attempt(succeeded=True)
                         label = action_executor._LABELS.get(forced_action, forced_action)
                         state.emit_log(_ts(), 'ACTION', f'{label}  [{source_label}]')
@@ -1063,6 +1225,10 @@ class WorkerThread(QThread):
             import traceback
             msg = f'Pipeline error: {exc}\n{traceback.format_exc()}'
             self.error.emit(msg)
+            try:
+                state.set_runtime_state(RuntimeState.ERROR.value, str(exc))
+            except Exception:
+                pass
             try:
                 log_runtime_error(f'Pipeline error: {exc}')
             except Exception:

@@ -173,3 +173,16 @@ def log_lifecycle_event(stage: str, status: str, details: str = '') -> None:
 def log_runtime_error(message: str) -> None:
     """Log runtime errors while keeping call sites concise."""
     get_mmgi_logger().error(message)
+
+
+def log_frame_drop(reason: str, count: int = 1, queue_size: int | None = None) -> None:
+    """Log frame drops caused by queue overflow, stale-drop, or budget pressure."""
+    if queue_size is None:
+        get_mmgi_logger().warning('Frame drop: reason=%s count=%d', reason, count)
+        return
+    get_mmgi_logger().warning(
+        'Frame drop: reason=%s count=%d queue_size=%d',
+        reason,
+        count,
+        queue_size,
+    )

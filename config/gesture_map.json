@@ -18,6 +18,8 @@
     "Media Mode": {
         "One Finger": "volume_up",
         "Two Fingers": "volume_down",
+        "Thumb and Index": "next_track",
+        "Thumb, Index and Middle": "prev_track",
         "Four Fingers": "play_pause",
         "Thumbs Up": "mute"
     },

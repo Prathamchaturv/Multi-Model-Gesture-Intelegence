@@ -12,15 +12,17 @@ tracker and matches it against known gesture patterns to return a
 human-readable gesture name.
 
 Recognised gestures:
-    Open Palm     – all 5 fingers extended        (activation trigger)
-    Fist          – all fingers curled            (deactivation trigger)
-    Thumbs Up     – only thumb extended
-    One Finger    – only index finger up          (pointing)
-    Two Fingers   – index + middle up             (peace sign)
-    Three Fingers – index + middle + ring up      (mode cycle trigger)
-    Four Fingers  – index + middle + ring + pinky up
-    Ring and Pinky – ring + pinky only up
-    Pinky         – only pinky up
+    Open Palm              – all 5 fingers extended        (activation trigger)
+    Fist                   – all fingers curled            (deactivation trigger)
+    Thumbs Up              – only thumb extended
+    Thumb and Index        – thumb and index extended      (next track in Media Mode)
+    Thumb, Index and Middle– thumb, index, middle extended (previous track in Media Mode)
+    One Finger             – only index finger up          (pointing)
+    Two Fingers            – index + middle up             (peace sign)
+    Three Fingers          – index + middle + ring up      (mode cycle trigger)
+    Four Fingers           – index + middle + ring + pinky up
+    Ring and Pinky         – ring + pinky only up
+    Pinky                  – only pinky up
 """
 
 import cv2
@@ -38,15 +40,17 @@ class GestureClassifier:
     # Fingers not listed are treated as "don't care" (ignored).
     # For full-hand gestures (Open Palm / Fist) all five are checked.
     _PATTERNS: list[tuple[str, dict]] = [
-        ('Open Palm',     {'thumb': True,  'index': True,  'middle': True,  'ring': True,  'pinky': True}),
-        ('Fist',          {'thumb': False, 'index': False, 'middle': False, 'ring': False, 'pinky': False}),
-        ('Thumbs Up',     {'thumb': True,  'index': False, 'middle': False, 'ring': False, 'pinky': False}),
-        ('Three Fingers', {'index': True,  'middle': True,  'ring': True,  'pinky': False}),
-        ('Four Fingers',  {'index': True,  'middle': True,  'ring': True,  'pinky': True}),
-        ('Two Fingers',   {'index': True,  'middle': True,  'ring': False, 'pinky': False}),
-        ('Ring and Pinky',{'index': False, 'middle': False, 'ring': True,  'pinky': True}),
-        ('One Finger',    {'index': True,  'middle': False, 'ring': False, 'pinky': False}),
-        ('Pinky',         {'index': False, 'middle': False, 'ring': False, 'pinky': True}),
+        ('Open Palm',               {'thumb': True,  'index': True,  'middle': True,  'ring': True,  'pinky': True}),
+        ('Fist',                    {'thumb': False, 'index': False, 'middle': False, 'ring': False, 'pinky': False}),
+        ('Thumbs Up',               {'thumb': True,  'index': False, 'middle': False, 'ring': False, 'pinky': False}),
+        ('Thumb and Index',         {'thumb': True,  'index': True,  'middle': False, 'ring': False, 'pinky': False}),
+        ('Thumb, Index and Middle', {'thumb': True,  'index': True,  'middle': True,  'ring': False, 'pinky': False}),
+        ('Three Fingers',           {'index': True,  'middle': True,  'ring': True,  'pinky': False}),
+        ('Four Fingers',            {'index': True,  'middle': True,  'ring': True,  'pinky': True}),
+        ('Two Fingers',             {'index': True,  'middle': True,  'ring': False, 'pinky': False}),
+        ('Ring and Pinky',          {'index': False, 'middle': False, 'ring': True,  'pinky': True}),
+        ('One Finger',              {'index': True,  'middle': False, 'ring': False, 'pinky': False}),
+        ('Pinky',                   {'index': False, 'middle': False, 'ring': False, 'pinky': True}),
     ]
 
     # Gestures that require ALL five fingers to be checked

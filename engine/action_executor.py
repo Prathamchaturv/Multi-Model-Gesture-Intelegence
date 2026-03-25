@@ -48,6 +48,7 @@ class ActionExecutor:
         'open_youtube':      'Open YouTube',
         'close_window':      'Close Window',
         'switch_tab':        'Switch Tab',
+        'cursor_move':       'Cursor Move',
         'scroll_down':       'Scroll Down',
         'scroll_up':         'Scroll Up',
         'next_track':        'Next Track',
@@ -133,6 +134,11 @@ class ActionExecutor:
 
             elif action == 'switch_tab':
                 self._hotkey('ctrl', 'tab')
+
+            elif action == 'cursor_move':
+                # Cursor movement is handled continuously in worker_thread
+                # This is a no-op in execute() as the gesture is not action-based
+                pass
 
             elif action == 'scroll_down':
                 self._scroll(-420)

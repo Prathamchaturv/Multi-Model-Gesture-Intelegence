@@ -812,3 +812,14 @@
 {"timestamp": "2026-03-25T10:59:20", "gesture_accuracy_pct": 88.26, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 93.75, "mode_switches_per_min": 2.0}
 {"timestamp": "2026-03-25T10:59:25", "gesture_accuracy_pct": 88.26, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 94.65, "mode_switches_per_min": 0.0}
 {"timestamp": "2026-03-25T10:59:27", "gesture_accuracy_pct": 88.26, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 94.5, "mode_switches_per_min": 0.0}
+{"timestamp": "2026-03-25T11:03:11", "gesture_accuracy_pct": 0.0, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 28.66, "mode_switches_per_min": 0.0}
+{"timestamp": "2026-03-25T11:03:16", "gesture_accuracy_pct": 90.91, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 40.59, "mode_switches_per_min": 0.0}
+{"timestamp": "2026-03-25T11:03:22", "gesture_accuracy_pct": 93.38, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 46.93, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T11:03:27", "gesture_accuracy_pct": 92.81, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 62.67, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T11:03:32", "gesture_accuracy_pct": 91.62, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 77.21, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T11:03:37", "gesture_accuracy_pct": 88.46, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 80.73, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T11:03:42", "gesture_accuracy_pct": 89.25, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 82.98, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T11:03:47", "gesture_accuracy_pct": 89.91, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 93.03, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T11:03:52", "gesture_accuracy_pct": 90.11, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 99.79, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T11:03:57", "gesture_accuracy_pct": 88.92, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 109.45, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T11:04:00", "gesture_accuracy_pct": 88.83, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 112.7, "mode_switches_per_min": 2.0}

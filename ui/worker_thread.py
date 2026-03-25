@@ -51,7 +51,6 @@ from core.calibration            import CalibrationManager
 from core.face_security          import FaceSecurityManager
 from core.voice_control          import VoiceCommandListener
 from engine.activation_manager   import ActivationManager
-from engine.cursor_controller    import CursorController
 from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
 from engine.metrics_manager      import MetricsManager
@@ -600,16 +599,7 @@ class WorkerThread(QThread):
             scroll_amount = 120  # Absolute pixels per scroll event
             last_scroll_gesture: str | None = None  # Track previous gesture to detect changes
 
-            # Cursor controller for smooth gesture-based movement
-            cursor_controller = CursorController(
-                smoothing_factor=0.7,   # Exponential smoothing - very responsive (nearly 1:1 tracking)
-                dead_zone_pixels=0,    # No dead zone - track every pixel movement
-                frame_threshold=1,     # Frames needed before activation - immediate response
-                screen_width=1920,
-                screen_height=1080,
-            )
-            cursor_active = False  # Track if cursor control is active
-            last_cursor_gesture: str | None = None
+
 
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
@@ -1091,16 +1081,9 @@ class WorkerThread(QThread):
                     )
 
                     # =========================================================
-                    # Gesture conflict resolution: Cursor vs Scroll vs Clicks
-                    # Priority: Scroll > Cursor > Clicks (in System Mode)
+                    # Gesture conflict resolution: Scroll vs Clicks
+                    # Priority: Scroll > Clicks (in System Mode)
                     # =========================================================
-                    is_cursor_gesture = (
-                        mode_manager.current_mode == 'System Mode'
-                        and effective_gesture == 'One Finger'
-                        and system_is_active
-                        and not use_cached_gesture
-                    )
-
                     is_scroll_down_gesture = (
                         mode_manager.current_mode == 'System Mode'
                         and effective_gesture == 'Thumb, Index and Middle'
@@ -1119,11 +1102,6 @@ class WorkerThread(QThread):
 
                     # Handle scroll gestures (highest priority in gesture conflicts)
                     if is_scroll_gesture:
-                        # Pause cursor when scrolling starts
-                        if cursor_active:
-                            cursor_controller.reset()
-                            cursor_active = False
-                            effective_gesture = None
 
                         target_direction = 'down' if is_scroll_down_gesture else 'up'
                         target_scroll_action = 'scroll_down' if target_direction == 'down' else 'scroll_up'
@@ -1151,41 +1129,13 @@ class WorkerThread(QThread):
                             last_scroll_time = now
 
                         effective_gesture = None
-                    # Handle cursor movement gesture (medium priority)
-                    elif is_cursor_gesture:
-                        # Pause scroll when cursor starts
-                        if scroll_active:
-                            scroll_active = False
-                            scroll_gesture_frame_count = 0
-                            scroll_direction = None
-                            state.emit_log(_ts(), 'ACTION', 'Scroll [stopped]')
-
-                        if hand_data is not None:
-                            index_landmark = hand_data.get('landmarks')
-                            if index_landmark is not None and len(index_landmark) > 0:
-                                # Extract index finger tip (landmark 8 in MediaPipe hand)
-                                idx_tip = index_landmark[8]  # x, y, z
-                                norm_pos = (idx_tip[0], idx_tip[1])  # Normalized coords
-
-                                cursor_moved = cursor_controller.update(norm_pos)
-                                if not cursor_active and cursor_controller.is_active:
-                                    cursor_active = True
-                                    last_cursor_gesture = effective_gesture
-                                    state.emit_log(_ts(), 'ACTION', 'Cursor Move [started]')
-
-                        effective_gesture = None
                     else:
-                        # No scroll or cursor gesture active
+                        # No scroll gesture active
                         if scroll_active:
                             scroll_active = False
                             scroll_gesture_frame_count = 0
                             scroll_direction = None
                             state.emit_log(_ts(), 'ACTION', 'Scroll [stopped]')
-
-                        if cursor_active:
-                            cursor_controller.reset()
-                            cursor_active = False
-                            state.emit_log(_ts(), 'ACTION', 'Cursor Move [stopped]')
 
                         if effective_gesture != last_scroll_gesture:
                             scroll_gesture_frame_count = 0

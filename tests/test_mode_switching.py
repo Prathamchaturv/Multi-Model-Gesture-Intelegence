@@ -257,6 +257,11 @@ def test_system_mode_one_finger_scroll():
     assert get_action('System Mode', 'One Finger') == 'scroll_down'
 
 
+def test_system_mode_thumb_index_scroll():
+    # System Mode: Thumb and Index gesture maps to continuous scroll_up
+    assert get_action('System Mode', 'Thumb and Index') == 'scroll_up'
+
+
 # ---------------------------------------------------------------------------
 # AirMouseController unit tests  (Win32 calls are mocked)
 # ---------------------------------------------------------------------------

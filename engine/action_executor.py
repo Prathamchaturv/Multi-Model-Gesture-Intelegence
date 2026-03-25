@@ -49,6 +49,7 @@ class ActionExecutor:
         'close_window':      'Close Window',
         'switch_tab':        'Switch Tab',
         'scroll_down':       'Scroll Down',
+        'scroll_up':         'Scroll Up',
         'next_track':        'Next Track',
         'prev_track':        'Previous Track',
         'play_pause':        'Play / Pause',
@@ -135,6 +136,9 @@ class ActionExecutor:
 
             elif action == 'scroll_down':
                 self._scroll(-420)
+
+            elif action == 'scroll_up':
+                self._scroll(420)
 
             elif action == 'left_click':
                 self._click('left')

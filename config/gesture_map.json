@@ -25,6 +25,7 @@
     },
     "System Mode": {
         "One Finger": "scroll_down",
+        "Thumb and Index": "scroll_up",
         "Two Fingers": "left_click",
         "Ring and Pinky": "right_click"
     },
@@ -86,6 +87,7 @@
             "close_window",
             "switch_tab",
             "scroll_down",
+            "scroll_up",
             "play_pause",
             "next_track",
             "prev_track",

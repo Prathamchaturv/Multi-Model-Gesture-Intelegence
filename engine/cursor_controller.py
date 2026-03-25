@@ -110,7 +110,7 @@ class CursorController:
             # Clamp to screen boundaries
             clamped_x = max(0, min(self.screen_width - 1, int(smooth_x)))
             clamped_y = max(0, min(self.screen_height - 1, int(smooth_y)))
-            pyautogui.moveMouse(clamped_x, clamped_y, duration=0)
+            pyautogui.moveTo(clamped_x, clamped_y, duration=0)
             return True
         except Exception:
             # pyautogui not available or other error

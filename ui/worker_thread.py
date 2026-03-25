@@ -51,6 +51,7 @@ from core.calibration            import CalibrationManager
 from core.face_security          import FaceSecurityManager
 from core.voice_control          import VoiceCommandListener
 from engine.activation_manager   import ActivationManager
+from engine.cursor_controller    import CursorController
 from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
 from engine.metrics_manager      import MetricsManager
@@ -599,6 +600,17 @@ class WorkerThread(QThread):
             scroll_amount = 120  # Absolute pixels per scroll event
             last_scroll_gesture: str | None = None  # Track previous gesture to detect changes
 
+            # Cursor controller for smooth gesture-based movement
+            cursor_controller = CursorController(
+                smoothing_factor=0.2,  # Exponential smoothing (0.1-0.3)
+                dead_zone_pixels=5,    # Minimum movement threshold
+                frame_threshold=2,     # Frames needed before activation
+                screen_width=1920,
+                screen_height=1080,
+            )
+            cursor_active = False  # Track if cursor control is active
+            last_cursor_gesture: str | None = None
+
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
             log_lifecycle_event('pipeline', 'started', 'Worker loop active')
@@ -1079,22 +1091,43 @@ class WorkerThread(QThread):
                     )
 
                     # =========================================================
-                    # Unified bidirectional scroll handler (System Mode)
-                    # One Finger → scroll_down, Thumb and Index → scroll_up
+                    # Gesture conflict resolution: Cursor vs Scroll vs Clicks
+                    # Priority: Scroll > Cursor > Clicks (in System Mode)
                     # =========================================================
-                    is_scroll_gesture = (
+                    is_cursor_gesture = (
                         mode_manager.current_mode == 'System Mode'
-                        and effective_gesture in ('One Finger', 'Thumb and Index')
+                        and effective_gesture == 'One Finger'
                         and system_is_active
                         and not use_cached_gesture
                     )
 
+                    is_scroll_down_gesture = (
+                        mode_manager.current_mode == 'System Mode'
+                        and effective_gesture == 'Thumb, Index and Middle'
+                        and system_is_active
+                        and not use_cached_gesture
+                    )
+
+                    is_scroll_up_gesture = (
+                        mode_manager.current_mode == 'System Mode'
+                        and effective_gesture == 'Thumb and Index'
+                        and system_is_active
+                        and not use_cached_gesture
+                    )
+
+                    is_scroll_gesture = is_scroll_down_gesture or is_scroll_up_gesture
+
+                    # Handle scroll gestures (highest priority in gesture conflicts)
                     if is_scroll_gesture:
-                        # Determine scroll direction based on gesture
-                        target_direction = 'down' if effective_gesture == 'One Finger' else 'up'
+                        # Pause cursor when scrolling starts
+                        if cursor_active:
+                            cursor_controller.reset()
+                            cursor_active = False
+                            effective_gesture = None
+
+                        target_direction = 'down' if is_scroll_down_gesture else 'up'
                         target_scroll_action = 'scroll_down' if target_direction == 'down' else 'scroll_up'
 
-                        # Handle gesture changes: stop old direction, start new one
                         if target_direction != scroll_direction:
                             scroll_gesture_frame_count = 0
                             scroll_direction = target_direction
@@ -1103,9 +1136,7 @@ class WorkerThread(QThread):
                         now = time.time()
 
                         if scroll_gesture_frame_count >= scroll_frame_threshold and not scroll_active:
-                            # Activate scrolling after threshold frames
                             scroll_active = True
-                            # Calculate signed scroll amount: negative for down, positive for up
                             signed_amount = -scroll_amount if scroll_direction == 'down' else scroll_amount
                             action_executor._scroll(signed_amount)
                             last_scroll_time = now
@@ -1115,23 +1146,47 @@ class WorkerThread(QThread):
                             state.set_action_executed(target_scroll_action)
                             last_scroll_gesture = effective_gesture
                         elif scroll_active and (now - last_scroll_time) >= scroll_interval_s:
-                            # Continue scrolling at controlled rate
                             signed_amount = -scroll_amount if scroll_direction == 'down' else scroll_amount
                             action_executor._scroll(signed_amount)
                             last_scroll_time = now
 
-                        # Skip normal gesture event creation to avoid duplicate scrolling
                         effective_gesture = None
-                    else:
-                        # Not a scroll gesture, handle scroll deactivation
+                    # Handle cursor movement gesture (medium priority)
+                    elif is_cursor_gesture:
+                        # Pause scroll when cursor starts
                         if scroll_active:
                             scroll_active = False
                             scroll_gesture_frame_count = 0
                             scroll_direction = None
-                            action_label = 'Scroll' if last_scroll_gesture else 'Scroll'
-                            state.emit_log(_ts(), 'ACTION', f'{action_label} [stopped]')
+                            state.emit_log(_ts(), 'ACTION', 'Scroll [stopped]')
 
-                        # Reset frame count if gesture changed
+                        if hand_data is not None:
+                            index_landmark = hand_data.get('landmarks')
+                            if index_landmark is not None and len(index_landmark) > 0:
+                                # Extract index finger tip (landmark 8 in MediaPipe hand)
+                                idx_tip = index_landmark[8]  # x, y, z
+                                norm_pos = (idx_tip[0], idx_tip[1])  # Normalized coords
+
+                                cursor_moved = cursor_controller.update(norm_pos)
+                                if not cursor_active and cursor_controller.is_active:
+                                    cursor_active = True
+                                    last_cursor_gesture = effective_gesture
+                                    state.emit_log(_ts(), 'ACTION', 'Cursor Move [started]')
+
+                        effective_gesture = None
+                    else:
+                        # No scroll or cursor gesture active
+                        if scroll_active:
+                            scroll_active = False
+                            scroll_gesture_frame_count = 0
+                            scroll_direction = None
+                            state.emit_log(_ts(), 'ACTION', 'Scroll [stopped]')
+
+                        if cursor_active:
+                            cursor_controller.reset()
+                            cursor_active = False
+                            state.emit_log(_ts(), 'ACTION', 'Cursor Move [stopped]')
+
                         if effective_gesture != last_scroll_gesture:
                             scroll_gesture_frame_count = 0
                             last_scroll_gesture = effective_gesture

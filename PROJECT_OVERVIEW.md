@@ -103,18 +103,37 @@ Calls `SharedState.set_*()` to push telemetry to connected UI widgets.
 - Loads `config/gesture_map.json` — `mode_switch`, `App Mode`, `Media Mode`, `System Mode` sections
 - `process(gesture)` → `(action | None, mode_changed_bool)`
 - Mode switching: 10-frame stability + 1.0 s hold + 1.5 s cooldown
-- Mode-switch gestures (1/2/3 fingers) are never forwarded as actions
+- Mode-switch gesture (`Three Fingers` → `next_mode`) is never forwarded as an action
 - `mode_stability_progress` (0–1) drives the stability bar in VisionPanel
 
 ### `config/gesture_map.json` — Mode Mappings
 ```json
 {
-  "mode_switch":  {"One Finger":"App Mode", "Two Fingers":"Media Mode", "Three Fingers":"System Mode"},
-  "App Mode":     {"Thumbs Up":"open_brave", "Ring and Pinky":"open_apple_music", "Pinky":"volume_up"},
-  "Media Mode":   {"Ring and Pinky":"next_track", "Pinky":"prev_track", "Open Palm":"play_pause", "Thumbs Up":"volume_up"},
-  "System Mode":  {"Thumbs Up":"volume_up", "Pinky":"volume_down", "Ring and Pinky":"mute"}
+  "mode_switch":  {"Three Fingers":"next_mode"},
+  "App Mode":     {
+    "One Finger":"open_brave",
+    "Two Fingers":"open_apple_music",
+    "Thumbs Up":"open_youtube",
+    "Ring and Pinky":"close_window"
+  },
+  "Media Mode":   {
+    "One Finger":"volume_up",
+    "Two Fingers":"volume_down",
+    "Thumb and Index":"next_track",
+    "Thumb, Index and Middle":"prev_track",
+    "Four Fingers":"play_pause",
+    "Thumbs Up":"mute"
+  },
+  "System Mode":  {
+    "Thumb and Index":"scroll_up",
+    "Thumb, Index and Middle":"scroll_down",
+    "Two Fingers":"left_click",
+    "Ring and Pinky":"right_click"
+  }
 }
 ```
+
+Note: Cursor movement has been intentionally removed from System Mode.
 
 ### `ui/main_window.py` — Dashboard Layout
 ```
@@ -157,7 +176,7 @@ Colour tokens: `BG_DEEP #0F0F14`, `BG_CARD #1A1A22`, `ACCENT #00E5FF`, `ACTIVE #
 |------|---------|----------|--------|
 | Activate | Open Palm | 2 seconds | System → ACTIVE (green) |
 | Deactivate | Fist | Instant | System → INACTIVE |
-| Switch Mode | 1/2/3 fingers | 1 second hold | App / Media / System mode |
+| Switch Mode | Three Fingers | 1 second hold | Cycle to next mode |
 | Execute Action | Any mode gesture | Instant (1 per 1 s cooldown) | Runs system action |
 
 ---

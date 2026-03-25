@@ -129,6 +129,7 @@ MMGI is built to fail safely and recover predictably.
 - Real-time gesture recognition using MediaPipe landmarks and OpenCV frame processing.
 - Multimodal command support (gesture + voice) through a unified decision pipeline.
 - Mode-aware command system: App Mode, Media Mode, System Mode.
+- System Mode uses scroll and click gestures (cursor movement is intentionally disabled).
 - Face-based authorization gate for protected execution contexts.
 - Runtime fail-safe states surfaced in UI (LOW_CONFIDENCE, AUTH_REQUIRED, COOLDOWN).
 - Latency-aware backpressure controls using bounded queueing and stale-frame dropping.

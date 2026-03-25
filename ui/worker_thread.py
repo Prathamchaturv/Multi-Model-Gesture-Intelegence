@@ -681,14 +681,16 @@ class WorkerThread(QThread):
 
                 if should_reload_calibration:
                     profile = calibration.load()
-                    activation_manager._open_palm_duration = profile.gesture_hold_seconds
-                    activation_manager._stability_threshold = activation_confirm_frames
+                    activation_manager.configure(
+                        open_palm_duration=profile.gesture_hold_seconds,
+                        stability_threshold=activation_confirm_frames,
+                    )
                     decision_engine.set_runtime_timing(
                         stability_frames=profile.stability_frames,
                         hold_seconds=profile.mode_switch_hold_seconds,
                         cooldown_seconds=profile.mode_switch_cooldown_seconds,
                     )
-                    mode_manager._cooldown_s = profile.mode_switch_cooldown_seconds
+                    mode_manager.configure(cooldown_s=profile.mode_switch_cooldown_seconds)
                     gesture_filter.set_confirm_frames(max(3, min(int(profile.stability_frames), 3)))
                     state.emit_log(_ts(), 'SYSTEM', 'Calibration reloaded from settings')
 

@@ -85,6 +85,7 @@ class Config:
             'max_inference_fps': 30.0,
             'frame_time_budget_ms': 33.0,
             'latest_gesture_ttl_s': 0.25,
+            'action_confirm_frames': 1,
         },
     }
 

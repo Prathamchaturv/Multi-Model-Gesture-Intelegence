@@ -252,9 +252,9 @@ def test_unknown_gesture_returns_none():
     assert get_action('App Mode', 'Unknown') is None
 
 
-def test_system_mode_no_map_action():
-    # System Mode uses AirMouseController — no JSON action strings
-    assert get_action('System Mode', 'One Finger') is None
+def test_system_mode_one_finger_scroll():
+    # System Mode: One Finger gesture now maps to continuous scroll_down
+    assert get_action('System Mode', 'One Finger') == 'scroll_down'
 
 
 # ---------------------------------------------------------------------------

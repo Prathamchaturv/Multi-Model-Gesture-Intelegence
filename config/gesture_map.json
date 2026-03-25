@@ -24,9 +24,9 @@
         "Thumbs Up": "mute"
     },
     "System Mode": {
+        "One Finger": "scroll_down",
         "Two Fingers": "left_click",
-        "Ring and Pinky": "right_click",
-        "Thumbs Up": "double_click"
+        "Ring and Pinky": "right_click"
     },
     "voice": {
         "App Mode": {

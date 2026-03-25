@@ -588,6 +588,14 @@ class WorkerThread(QThread):
             frame_budget_log_interval_s = 8.0
             last_frame_budget_log_ts = 0.0
 
+            # Continuous scrolling state (One Finger gesture in System Mode)
+            scroll_active = False
+            scroll_gesture_frame_count = 0
+            scroll_frame_threshold = 2  # Require 2+ frames of "One Finger" before activating scroll
+            last_scroll_time = 0.0
+            scroll_interval_s = 0.05  # Scroll every 50ms for smooth continuous scrolling
+            scroll_amount = -120  # Pixels per scroll event (negative = down)
+
             state.emit_log(_ts(), 'SYSTEM', 'Pipeline started — show Open Palm to activate')
             log_pipeline_state('Pipeline started')
             log_lifecycle_event('pipeline', 'started', 'Worker loop active')
@@ -1066,6 +1074,45 @@ class WorkerThread(QThread):
                         and (not use_cached_gesture)
                         and decision_engine.is_mode_switch(effective_gesture)
                     )
+
+                    # =========================================================
+                    # Continuous scrolling handler (One Finger in System Mode)
+                    # =========================================================
+                    if (
+                        mode_manager.current_mode == 'System Mode'
+                        and effective_gesture == 'One Finger'
+                        and system_is_active
+                        and not use_cached_gesture
+                    ):
+                        # Gesture is "One Finger" in System Mode: handle as continuous scroll
+                        scroll_gesture_frame_count += 1
+                        now = time.time()
+
+                        if scroll_gesture_frame_count >= scroll_frame_threshold and not scroll_active:
+                            # Activate scrolling after threshold frames
+                            scroll_active = True
+                            action_executor._scroll(scroll_amount)
+                            last_scroll_time = now
+                            metrics.record_activation_attempt(succeeded=True)
+                            state.emit_log(_ts(), 'ACTION', 'Scroll Down  [System Mode]')
+                            state.set_action_executed('scroll_down')
+                        elif scroll_active and (now - last_scroll_time) >= scroll_interval_s:
+                            # Continue scrolling at controlled rate
+                            action_executor._scroll(scroll_amount)
+                            last_scroll_time = now
+
+                        # Skip normal gesture event creation to avoid duplicate scrolling
+                        effective_gesture = None
+                    else:
+                        # Not continuous scroll gesture, reset scroll state
+                        if scroll_active:
+                            scroll_active = False
+                            scroll_gesture_frame_count = 0
+                            state.emit_log(_ts(), 'ACTION', 'Scroll Down [stopped]')
+
+                        # Reset frame count if gesture changed or no longer "One Finger"
+                        if effective_gesture != 'One Finger' or mode_manager.current_mode != 'System Mode':
+                            scroll_gesture_frame_count = 0
 
                     if custom_action and should_execute:
                         # Custom gestures bypass map lookup but still use unified execution path.

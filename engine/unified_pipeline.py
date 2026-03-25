@@ -136,6 +136,11 @@ class ModeManager:
     def set_mode(self, mode: str) -> None:
         self._current_mode = mode
 
+    def configure(self, *, cooldown_s: float | None = None) -> None:
+        """Adjust mode-switch policy at runtime via a stable public API."""
+        if cooldown_s is not None:
+            self._cooldown_s = max(0.0, float(cooldown_s))
+
     def apply_switch(self, target_mode: str, timestamp: float | None = None) -> ModeSwitchDecision:
         now = time.time() if timestamp is None else float(timestamp)
         if (now - self._last_switch_time) < self._cooldown_s:

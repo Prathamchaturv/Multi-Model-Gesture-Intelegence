@@ -94,9 +94,17 @@ class CursorController:
             smooth_x = curr_x
             smooth_y = curr_y
 
+        # Clamp to screen boundaries BEFORE dead zone check
+        # Use screen dimensions directly (not -1) to reach full screen including edges
+        clamped_x = max(0, min(self.screen_width, int(smooth_x)))
+        clamped_y = max(0, min(self.screen_height, int(smooth_y)))
+
         # Check dead zone (minimum movement threshold)
-        delta_x = abs(smooth_x - (self.prev_x or smooth_x))
-        delta_y = abs(smooth_y - (self.prev_y or smooth_y))
+        prev_clamped_x = max(0, min(self.screen_width, int(self.prev_x or clamped_x)))
+        prev_clamped_y = max(0, min(self.screen_height, int(self.prev_y or clamped_y)))
+        
+        delta_x = abs(clamped_x - prev_clamped_x)
+        delta_y = abs(clamped_y - prev_clamped_y)
 
         if delta_x < self.dead_zone_pixels and delta_y < self.dead_zone_pixels:
             # Movement too small, ignore
@@ -108,9 +116,6 @@ class CursorController:
         self.last_update_time = time.time()
 
         try:
-            # Clamp to screen boundaries
-            clamped_x = max(0, min(self.screen_width - 1, int(smooth_x)))
-            clamped_y = max(0, min(self.screen_height - 1, int(smooth_y)))
             pyautogui.moveTo(clamped_x, clamped_y, duration=0)
             return True
         except Exception:

@@ -252,14 +252,19 @@ def test_unknown_gesture_returns_none():
     assert get_action('App Mode', 'Unknown') is None
 
 
-def test_system_mode_one_finger_scroll():
-    # System Mode: One Finger gesture now maps to continuous scroll_down
-    assert get_action('System Mode', 'One Finger') == 'scroll_down'
+def test_system_mode_one_finger_cursor():
+    # System Mode: One Finger gesture now maps to cursor_move
+    assert get_action('System Mode', 'One Finger') == 'cursor_move'
 
 
 def test_system_mode_thumb_index_scroll():
     # System Mode: Thumb and Index gesture maps to continuous scroll_up
     assert get_action('System Mode', 'Thumb and Index') == 'scroll_up'
+
+
+def test_system_mode_thumb_index_middle_scroll():
+    # System Mode: Thumb, Index and Middle gesture maps to scroll_down
+    assert get_action('System Mode', 'Thumb, Index and Middle') == 'scroll_down'
 
 
 # ---------------------------------------------------------------------------

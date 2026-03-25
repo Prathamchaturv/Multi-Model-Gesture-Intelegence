@@ -30,13 +30,14 @@ class CursorController:
         Initialize cursor controller.
         
         Args:
-            smoothing_factor: Exponential smoothing (0.1-0.3 recommended)
-            dead_zone_pixels: Minimum movement before cursor updates
-            frame_threshold: Frames needed before activation (2-3 recommended)
+            smoothing_factor: Exponential smoothing (0.1-0.5 recommended)
+                             Higher = more responsive, Lower = smoother
+            dead_zone_pixels: Minimum movement before cursor updates (1-5 recommended)
+            frame_threshold: Frames needed before activation (1-3 recommended)
             screen_width: Display width in pixels
             screen_height: Display height in pixels
         """
-        self.smoothing_factor = max(0.1, min(0.3, float(smoothing_factor)))
+        self.smoothing_factor = max(0.05, min(0.8, float(smoothing_factor)))
         self.dead_zone_pixels = max(1, int(dead_zone_pixels))
         self.frame_threshold = max(1, int(frame_threshold))
         self.screen_width = max(640, int(screen_width))

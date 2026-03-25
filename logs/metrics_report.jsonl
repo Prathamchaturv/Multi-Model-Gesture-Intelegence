@@ -788,3 +788,11 @@
 {"timestamp": "2026-03-25T10:51:02", "gesture_accuracy_pct": 90.12, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 100.24, "mode_switches_per_min": 2.0}
 {"timestamp": "2026-03-25T10:51:07", "gesture_accuracy_pct": 90.24, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 100.38, "mode_switches_per_min": 1.0}
 {"timestamp": "2026-03-25T10:51:12", "gesture_accuracy_pct": 90.11, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 90.24, "mode_switches_per_min": 0.0}
+{"timestamp": "2026-03-25T10:55:05", "gesture_accuracy_pct": 0.0, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 26.58, "mode_switches_per_min": 0.0}
+{"timestamp": "2026-03-25T10:55:10", "gesture_accuracy_pct": 87.5, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 56.82, "mode_switches_per_min": 1.0}
+{"timestamp": "2026-03-25T10:55:15", "gesture_accuracy_pct": 88.54, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 66.85, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T10:55:21", "gesture_accuracy_pct": 86.51, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 83.51, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T10:55:26", "gesture_accuracy_pct": 90.56, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 78.61, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T10:55:31", "gesture_accuracy_pct": 91.85, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 76.08, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T10:55:36", "gesture_accuracy_pct": 91.86, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 85.05, "mode_switches_per_min": 2.0}
+{"timestamp": "2026-03-25T10:55:40", "gesture_accuracy_pct": 92.05, "false_activation_rate_pct": 0.0, "avg_response_latency_ms": 87.9, "mode_switches_per_min": 2.0}

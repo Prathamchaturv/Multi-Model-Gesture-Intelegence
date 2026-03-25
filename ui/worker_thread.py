@@ -602,9 +602,9 @@ class WorkerThread(QThread):
 
             # Cursor controller for smooth gesture-based movement
             cursor_controller = CursorController(
-                smoothing_factor=0.2,  # Exponential smoothing (0.1-0.3)
-                dead_zone_pixels=5,    # Minimum movement threshold
-                frame_threshold=2,     # Frames needed before activation
+                smoothing_factor=0.45,  # Exponential smoothing (0.1-0.3) - increased for responsiveness
+                dead_zone_pixels=1,    # Minimum movement threshold - reduced for smooth tracking
+                frame_threshold=1,     # Frames needed before activation - reduced for quick response
                 screen_width=1920,
                 screen_height=1080,
             )

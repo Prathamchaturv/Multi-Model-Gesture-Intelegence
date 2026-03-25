@@ -24,7 +24,6 @@
         "Thumbs Up": "mute"
     },
     "System Mode": {
-        "One Finger": "cursor_move",
         "Thumb and Index": "scroll_up",
         "Thumb, Index and Middle": "scroll_down",
         "Two Fingers": "left_click",
@@ -87,7 +86,6 @@
             "open_youtube",
             "close_window",
             "switch_tab",
-            "cursor_move",
             "scroll_down",
             "scroll_up",
             "play_pause",

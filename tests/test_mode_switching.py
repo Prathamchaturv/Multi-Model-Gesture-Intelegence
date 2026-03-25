@@ -252,9 +252,9 @@ def test_unknown_gesture_returns_none():
     assert get_action('App Mode', 'Unknown') is None
 
 
-def test_system_mode_one_finger_cursor():
-    # System Mode: One Finger gesture now maps to cursor_move
-    assert get_action('System Mode', 'One Finger') == 'cursor_move'
+def test_system_mode_one_finger_unmapped():
+    # System Mode: One Finger gesture is now unmapped (cursor control removed)
+    assert get_action('System Mode', 'One Finger') is None
 
 
 def test_system_mode_thumb_index_scroll():

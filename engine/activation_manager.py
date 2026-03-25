@@ -85,6 +85,21 @@ class ActivationManager:
             if reason:
                 print(f'✓ System resumed: {reason}')
 
+    def configure(
+        self,
+        *,
+        open_palm_duration: float | None = None,
+        cooldown_duration: float | None = None,
+        stability_threshold: int | None = None,
+    ) -> None:
+        """Update runtime gating parameters without direct private-field mutation."""
+        if open_palm_duration is not None:
+            self._open_palm_duration = max(0.1, float(open_palm_duration))
+        if cooldown_duration is not None:
+            self._cooldown_duration = max(0.0, float(cooldown_duration))
+        if stability_threshold is not None:
+            self._stability_threshold = max(1, int(stability_threshold))
+
     # ------------------------------------------------------------------
     # Main update — called once per frame
     # ------------------------------------------------------------------

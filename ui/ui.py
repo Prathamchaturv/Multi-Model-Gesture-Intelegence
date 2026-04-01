@@ -514,6 +514,7 @@ class VisionPanel(QWidget):
         super().__init__(parent)
         self._state = state
         self._current_mode = 'App Mode'
+        self._current_user_state = 'open'
         self._build_ui()
         self._connect_state()
 
@@ -605,7 +606,7 @@ class VisionPanel(QWidget):
         chip_2, self._action_executed_val = self._make_status_chip('FINAL ACTION', ACTIVE)
         chip_3, self._gesture_state_val = self._make_status_chip('GESTURE STATE', INACTIVE)
         chip_4, self._voice_command_val = self._make_status_chip('VOICE COMMAND', MODE_MEDIA)
-        chip_5, self._activation_lock_val = self._make_status_chip('ACTIVATION LOCK', INACTIVE)
+        chip_5, self._activation_lock_val = self._make_status_chip('AUTH CONTROL', INACTIVE)
         chip_6, self._face_auth_val = self._make_status_chip('FACE AUTH', TEXT_SEC)
         chip_7, self._failsafe_state_val = self._make_status_chip('FAIL-SAFE STATE', ACTIVE)
         chip_8, self._failsafe_feedback_val = self._make_status_chip('FAIL-SAFE FEEDBACK', TEXT_SEC)
@@ -785,7 +786,8 @@ class VisionPanel(QWidget):
         s.face_auth_changed.connect(self._on_face_auth_changed)
         s.voice_command_changed.connect(self._on_voice_command_changed)
         s.gesture_status_changed.connect(self._on_gesture_status_changed)
-        s.activation_lock_changed.connect(self._on_activation_lock_changed)
+        s.adaptive_auth_feedback_changed.connect(self._on_auth_feedback_changed)
+        s.user_state_changed.connect(self._on_user_state_changed)
         s.fail_safe_state_changed.connect(self._on_fail_safe_state_changed)
         s.runtime_state_changed.connect(self._on_runtime_state_changed)
         s.face_security_enabled_changed.connect(self._on_face_lock_state)
@@ -852,6 +854,10 @@ class VisionPanel(QWidget):
         text = label if label else '—'
         self._action_executed_val.setText(self._compact_text(text, 18))
         self._action_executed_val.setToolTip(text)
+        self._activation_lock_val.setText('Executed')
+        self._activation_lock_val.setStyleSheet(
+            f'color: {ACTIVE}; font-size: 12px; font-weight: 700; background: transparent; border: none;'
+        )
 
     @pyqtSlot(str)
     def _on_voice_command_changed(self, command_text: str) -> None:
@@ -900,6 +906,25 @@ class VisionPanel(QWidget):
         self._activation_lock_val.setStyleSheet(
             f'color: {colour}; font-size: 12px; font-weight: 700; background: transparent; border: none;'
         )
+
+    @pyqtSlot(str)
+    def _on_auth_feedback_changed(self, feedback: str) -> None:
+        normalized = (feedback or '').strip() or 'Executed'
+        colour = {
+            'Executed': ACTIVE,
+            'Stabilizing...': MODE_MEDIA,
+            'Hold to Confirm': MODE_SYSTEM,
+            'Access Controlled': INACTIVE,
+        }.get(normalized, TEXT_SEC)
+        self._activation_lock_val.setText(self._compact_text(normalized, 18))
+        self._activation_lock_val.setToolTip(f'{normalized} | User State: {self._current_user_state}')
+        self._activation_lock_val.setStyleSheet(
+            f'color: {colour}; font-size: 12px; font-weight: 700; background: transparent; border: none;'
+        )
+
+    @pyqtSlot(str)
+    def _on_user_state_changed(self, state: str) -> None:
+        self._current_user_state = (state or 'open').lower()
 
     @pyqtSlot(str, str)
     def _on_fail_safe_state_changed(self, state_key: str, message: str) -> None:

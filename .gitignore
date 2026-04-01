@@ -22,8 +22,13 @@ build/
 .coverage
 htmlcov/
 
-# Runtime logs
-logs/*.log
+# Runtime logs and metrics
+logs/*.log*
+logs/metrics_report.jsonl
+
+# Local face-auth runtime artifacts
+config/authorized_face.jpg
+config/authorized_face_encoding.json
 
 # IDE / editor
 .vscode/

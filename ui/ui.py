@@ -29,16 +29,18 @@ import time
 # Colour tokens & global QSS  (was ui/styles.py)
 # ===========================================================================
 
-BG_DEEP   = '#090E1A'
-BG_CARD   = '#131C2E'
-BG_HOVER  = '#1A2740'
-BORDER    = '#243350'
-ACCENT    = '#22D3EE'
-ACTIVE    = '#34D399'
-INACTIVE  = '#FB7185'
-TEXT_PRI  = '#E6EEF9'
-TEXT_SEC  = '#A5B4CC'
-TEXT_HINT = '#6B7B96'
+BG_DEEP   = '#0B1220'
+BG_CARD   = '#121A2D'
+BG_HOVER  = '#1A2640'
+BORDER    = '#274061'
+ACCENT    = '#38DDF8'
+ACCENT_SOFT = '#7BE9FF'
+ACTIVE    = '#33E6A8'
+WARNING   = '#F7C559'
+INACTIVE  = '#FF6B87'
+TEXT_PRI  = '#E9F2FF'
+TEXT_SEC  = '#B6C6DE'
+TEXT_HINT = '#788CAB'
 
 MODE_APP    = '#22D3EE'
 MODE_MEDIA  = '#60A5FA'
@@ -48,7 +50,7 @@ GLOBAL_QSS = f"""
 QMainWindow, QWidget {{
     background-color: {BG_DEEP};
     color: {TEXT_PRI};
-    font-family: "Outfit", "Poppins", "Segoe UI", sans-serif;
+    font-family: "Inter", "SF Pro Text", "Segoe UI", sans-serif;
     font-size: 13px;
 }}
 QScrollBar:vertical {{
@@ -68,7 +70,9 @@ QScrollBar::handle:horizontal {{
 QScrollBar::handle:horizontal:hover {{ background: {ACCENT}; }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 QFrame#card {{
-    background-color: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 14px;
+    background-color: rgba(18, 26, 45, 0.84);
+    border: 1px solid rgba(123, 233, 255, 0.14);
+    border-radius: 16px;
 }}
 QLabel#section_title {{ color: {ACCENT}; font-size: 11px; font-weight: 600; letter-spacing: 2px; }}
 QLabel#value_large   {{ color: {TEXT_PRI}; font-size: 28px; font-weight: 700; }}
@@ -85,7 +89,12 @@ QPushButton#nav_btn {{
     padding: 10px 16px; text-align: left; font-size: 13px;
 }}
 QPushButton#nav_btn:hover {{ background-color: {BG_HOVER}; color: {TEXT_PRI}; }}
-QPushButton#nav_btn[selected="true"] {{ background-color: rgba(34,211,238,0.14); color: {ACCENT}; font-weight: 700; }}
+QPushButton#nav_btn[selected="true"] {{
+    background-color: rgba(56,221,248,0.16);
+    color: {ACCENT_SOFT};
+    font-weight: 700;
+    border: 1px solid rgba(123,233,255,0.34);
+}}
 QProgressBar {{
     background-color: {BORDER}; border-radius: 4px; border: none; height: 6px; text-align: center; color: transparent;
 }}
@@ -206,12 +215,21 @@ def _save_face_security_config(data: dict) -> None:
 MAX_EVENTS = 200
 
 _CATEGORY_STYLE = {
-    'ACTION': (ACCENT,    'rgba(0,229,255,0.12)'),
-    'MODE':   (ACTIVE,    'rgba(0,255,136,0.12)'),
-    'SYSTEM': (TEXT_SEC,  'rgba(138,138,160,0.12)'),
-    'ERROR':  (INACTIVE,  'rgba(255,68,102,0.12)'),
+    'ACTION': (ACCENT,    'rgba(56,221,248,0.13)'),
+    'MODE':   (ACTIVE,    'rgba(51,230,168,0.13)'),
+    'SYSTEM': (TEXT_SEC,  'rgba(182,198,222,0.13)'),
+    'ERROR':  (INACTIVE,  'rgba(255,107,135,0.13)'),
+    'WARNING': (WARNING,  'rgba(247,197,89,0.15)'),
 }
 _DEFAULT_STYLE = (TEXT_SEC, 'rgba(138,138,160,0.12)')
+
+_CATEGORY_ICON = {
+    'ACTION': '▶',
+    'MODE': '◈',
+    'SYSTEM': '●',
+    'ERROR': '✕',
+    'WARNING': '▲',
+}
 
 
 def _pill_colour(category: str) -> tuple[str, str]:
@@ -222,19 +240,19 @@ class EventPill(QFrame):
     def __init__(self, timestamp: str, category: str, description: str) -> None:
         super().__init__()
         colour, bg = _pill_colour(category)
-        self.setFixedHeight(42)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(40)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        cat_key = category.upper()
+        icon = _CATEGORY_ICON.get(cat_key, '•')
         self.setStyleSheet(
-            f'QFrame {{ background-color: {bg}; border: 1px solid {colour}33; border-radius: 21px; }}'
+            f'QFrame {{ background-color: {bg}; border: 1px solid {colour}33; border-radius: 14px; }}'
         )
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 0, 14, 0)
+        lay.setContentsMargins(12, 0, 12, 0)
         lay.setSpacing(8)
 
-        dot = QLabel('●')
+        dot = QLabel(icon)
         dot.setStyleSheet(f'color: {colour}; font-size: 10px; background: transparent; border: none;')
-        ts_lbl = QLabel(timestamp)
-        ts_lbl.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px; background: transparent; border: none;')
         cat_lbl = QLabel(category.upper())
         cat_lbl.setStyleSheet(
             f'color: {colour}; font-size: 10px; font-weight: 700; letter-spacing: 1px; background: transparent; border: none;'
@@ -243,16 +261,17 @@ class EventPill(QFrame):
         desc_lbl.setStyleSheet(f'color: {TEXT_PRI}; font-size: 12px; background: transparent; border: none;')
 
         lay.addWidget(dot)
-        lay.addWidget(ts_lbl)
         lay.addWidget(cat_lbl)
         lay.addWidget(desc_lbl)
+        self.setToolTip(f'{timestamp}  |  {category.upper()}')
         self.adjustSize()
 
 
 class ActivityLog(QWidget):
-    def __init__(self, state: SharedState, parent: QWidget | None = None) -> None:
+    def __init__(self, state: SharedState, compact: bool = False, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._state  = state
+        self._compact = compact
         self._count  = 0
         self._pills: list[EventPill] = []
         self._last_event_signature: tuple[str, str] | None = None
@@ -262,8 +281,11 @@ class ActivityLog(QWidget):
         state.log_event.connect(self._on_log_event)
 
     def _build(self) -> None:
-        self.setFixedHeight(76)
-        self.setStyleSheet(f'background-color: {BG_CARD}; border-top: 1px solid {BORDER};')
+        if self._compact:
+            self.setFixedHeight(90)
+        self.setStyleSheet(
+            f'background-color: rgba(18, 26, 45, 0.65); border-top: 1px solid rgba(123,233,255,0.16);'
+        )
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(20, 6, 20, 6)
@@ -283,15 +305,15 @@ class ActivityLog(QWidget):
 
         self._scroll = QScrollArea()
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._scroll.setWidgetResizable(True)
         self._scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
 
         self._inner = QWidget()
         self._inner.setStyleSheet('background: transparent;')
-        self._pills_lay = QHBoxLayout(self._inner)
+        self._pills_lay = QVBoxLayout(self._inner)
         self._pills_lay.setContentsMargins(0, 0, 0, 0)
-        self._pills_lay.setSpacing(8)
+        self._pills_lay.setSpacing(6)
         self._pills_lay.addStretch()
 
         self._scroll.setWidget(self._inner)
@@ -322,10 +344,10 @@ class ActivityLog(QWidget):
 
         self._count += 1
         self._count_lbl.setText(f'{self._count} event{"s" if self._count != 1 else ""}')
-        QTimer.singleShot(30, self._scroll_right)
+        QTimer.singleShot(30, self._scroll_bottom)
 
-    def _scroll_right(self) -> None:
-        sb = self._scroll.horizontalScrollBar()
+    def _scroll_bottom(self) -> None:
+        sb = self._scroll.verticalScrollBar()
         sb.setValue(sb.maximum())
 
 
@@ -338,11 +360,11 @@ COLLAPSED_W = 56
 ANIM_MS     = 200
 
 _TABS = [
-    ('vision',   '◉', 'Vision'),
-    ('mode',     '⊞', 'Mode'),
-    ('gestures', '✋', 'Gestures'),
-    ('help',     '?', 'Guide'),
-    ('settings', '⚙', 'Settings'),
+    ('vision',   'VI', 'Vision'),
+    ('gestures', 'GE', 'Gestures'),
+    ('mode',     'MO', 'Modes'),
+    ('logs',     'LG', 'Logs'),
+    ('settings', 'ST', 'Settings'),
 ]
 
 
@@ -452,6 +474,16 @@ class Sidebar(QWidget):
             btn = self._nav_btns[tab_id]
             btn.setText(icon if self._collapsed else f'{icon}  {label}')
 
+    def enterEvent(self, event) -> None:
+        super().enterEvent(event)
+        if self._collapsed:
+            self.toggle_collapse()
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        if not self._collapsed:
+            self.toggle_collapse()
+
     @staticmethod
     def _nav_btn_style(selected: bool = False) -> str:
         if selected:
@@ -524,6 +556,17 @@ class VisionPanel(QWidget):
         self._mode_banner.setVisible(False)
         root.addWidget(self._mode_banner)
 
+        self._gesture_flash = QLabel('GESTURE DETECTED')
+        self._gesture_flash.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._gesture_flash.setFixedHeight(28)
+        self._gesture_flash.setVisible(False)
+        self._gesture_flash.setStyleSheet(
+            f'background-color: rgba(56,221,248,0.12); color: {ACCENT_SOFT}; '
+            f'border: 1px solid rgba(123,233,255,0.45); border-radius: 10px; '
+            f'font-size: 11px; font-weight: 700; letter-spacing: 1px;'
+        )
+        root.addWidget(self._gesture_flash)
+
         # ── Active mode indicator buttons ─────────────────────────────
         mode_row = QHBoxLayout()
         mode_row.setSpacing(8)
@@ -551,12 +594,12 @@ class VisionPanel(QWidget):
         # ── Gesture detection feedback ────────────────────────────────
         feedback_frame = QFrame()
         feedback_frame.setStyleSheet(
-            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}'
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
         )
         fb_lay = QGridLayout(feedback_frame)
-        fb_lay.setContentsMargins(10, 8, 10, 8)
-        fb_lay.setHorizontalSpacing(10)
-        fb_lay.setVerticalSpacing(8)
+        fb_lay.setContentsMargins(16, 16, 16, 16)
+        fb_lay.setHorizontalSpacing(8)
+        fb_lay.setVerticalSpacing(12)
 
         chip_1, self._gesture_detected_val = self._make_status_chip('DETECTED GESTURE', TEXT_PRI)
         chip_2, self._action_executed_val = self._make_status_chip('FINAL ACTION', ACTIVE)
@@ -577,10 +620,51 @@ class VisionPanel(QWidget):
         fb_lay.addWidget(chip_7, 2, 0)
         fb_lay.addWidget(chip_8, 2, 1, 1, 2)
         fb_lay.addWidget(chip_9, 3, 0)
+        fb_lay.setRowMinimumHeight(0, 84)
+        fb_lay.setRowMinimumHeight(1, 84)
+        fb_lay.setRowMinimumHeight(2, 84)
+        fb_lay.setRowMinimumHeight(3, 84)
         fb_lay.setColumnStretch(0, 1)
         fb_lay.setColumnStretch(1, 1)
         fb_lay.setColumnStretch(2, 1)
         root.addWidget(feedback_frame)
+
+        quick_controls = QFrame()
+        quick_controls.setStyleSheet(
+            f'QFrame {{ background: rgba(18, 26, 45, 0.84); border: 1px solid rgba(123,233,255,0.14); border-radius: 12px; }}'
+        )
+        qc_lay = QHBoxLayout(quick_controls)
+        qc_lay.setContentsMargins(16, 8, 16, 8)
+        qc_lay.setSpacing(8)
+
+        self._face_lock_btn = QPushButton('Face Lock: ON')
+        self._face_lock_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._face_lock_btn.setStyleSheet(
+            f'QPushButton {{ background: rgba(51,230,168,0.12); color: {ACTIVE}; border: 1px solid {ACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+            f'QPushButton:hover {{ background: rgba(51,230,168,0.24); }}'
+        )
+        self._face_lock_btn.clicked.connect(self._toggle_face_lock)
+
+        self._reset_tracking_btn = QPushButton('Reset Tracking')
+        self._reset_tracking_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._reset_tracking_btn.setStyleSheet(
+            f'QPushButton {{ background: rgba(56,221,248,0.12); color: {ACCENT}; border: 1px solid {ACCENT}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+            f'QPushButton:hover {{ background: rgba(56,221,248,0.24); }}'
+        )
+        self._reset_tracking_btn.clicked.connect(self._reset_tracking_state)
+
+        self._gesture_btn = QPushButton('Gestures: ON')
+        self._gesture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._gesture_btn.setStyleSheet(
+            f'QPushButton {{ background: rgba(51,230,168,0.12); color: {ACTIVE}; border: 1px solid {ACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+            f'QPushButton:hover {{ background: rgba(51,230,168,0.24); }}'
+        )
+        self._gesture_btn.clicked.connect(self._toggle_gestures)
+
+        qc_lay.addWidget(self._face_lock_btn)
+        qc_lay.addWidget(self._reset_tracking_btn)
+        qc_lay.addWidget(self._gesture_btn)
+        root.addWidget(quick_controls)
 
         # ── Mode-switch stability bar ─────────────────────────────────
         stab_lbl = QLabel('MODE SWITCH HOLD')
@@ -615,15 +699,15 @@ class VisionPanel(QWidget):
         screen_h = screen.availableGeometry().height() if screen else window_h
 
         if screen_h < 800:
-            min_h, max_h = 210, 360
+            min_h, max_h = 180, 300
         elif screen_h < 1050:
-            min_h, max_h = 240, 460
+            min_h, max_h = 210, 390
         else:
-            min_h, max_h = 280, 560
+            min_h, max_h = 250, 500
 
         content_w = max(panel_w - 56, 320)
         by_aspect = int((content_w * 9) / 16) + 16
-        by_panel = int(min(panel_h, window_h) * 0.48)
+        by_panel = int(min(panel_h, window_h) * 0.40)
         target_h = max(min_h, min(max_h, min(by_aspect, by_panel)))
 
         self._cam_frame.setMinimumHeight(min_h)
@@ -661,23 +745,31 @@ class VisionPanel(QWidget):
     @staticmethod
     def _make_status_chip(title: str, value_colour: str) -> tuple[QFrame, QLabel]:
         chip = QFrame()
+        chip.setFixedHeight(84)
+        chip.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         chip.setStyleSheet(
-            f'QFrame {{ background: rgba(138,138,160,0.08); border: 1px solid {BORDER}; border-radius: 8px; }}'
+            f'QFrame {{ background: rgba(138,138,160,0.08); border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
         lay = QVBoxLayout(chip)
-        lay.setContentsMargins(10, 6, 10, 6)
-        lay.setSpacing(2)
+        lay.setContentsMargins(12, 10, 12, 12)
+        lay.setSpacing(8)
 
         title_lbl = QLabel(title)
         title_lbl.setStyleSheet(
             f'color: {TEXT_HINT}; font-size: 9px; font-weight: 600; letter-spacing: 1px; '
             f'background: transparent; border: none;'
         )
+        title_lbl.setFixedHeight(12)
+        title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         value_lbl = QLabel('—')
         value_lbl.setStyleSheet(
-            f'color: {value_colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+            f'color: {value_colour}; font-size: 10px; font-weight: 700; background: transparent; border: none;'
         )
         value_lbl.setWordWrap(False)
+        value_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        value_lbl.setMinimumHeight(18)
+        value_lbl.setMaximumHeight(18)
+        value_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         lay.addWidget(title_lbl)
         lay.addWidget(value_lbl)
@@ -696,6 +788,8 @@ class VisionPanel(QWidget):
         s.activation_lock_changed.connect(self._on_activation_lock_changed)
         s.fail_safe_state_changed.connect(self._on_fail_safe_state_changed)
         s.runtime_state_changed.connect(self._on_runtime_state_changed)
+        s.face_security_enabled_changed.connect(self._on_face_lock_state)
+        s.gesture_control_enabled_changed.connect(self._on_gesture_control_state)
 
     @pyqtSlot(QImage)
     def update_frame(self, image: QImage) -> None:
@@ -745,31 +839,35 @@ class VisionPanel(QWidget):
     @pyqtSlot(str)
     def _on_gesture_changed(self, gesture: str) -> None:
         text = gesture if gesture else '—'
-        self._gesture_detected_val.setText(self._compact_text(text, 22))
+        self._gesture_detected_val.setText(self._compact_text(text, 18))
         self._gesture_detected_val.setToolTip(text)
+        if gesture:
+            self._gesture_flash.setText(f'GESTURE DETECTED  •  {self._compact_text(gesture, 18).upper()}')
+            self._gesture_flash.setVisible(True)
+            QTimer.singleShot(650, lambda: self._gesture_flash.setVisible(False))
 
     @pyqtSlot(str)
     def _on_action_executed(self, action: str) -> None:
         label = _ACTION_DISPLAY_LABELS.get(action, action)
         text = label if label else '—'
-        self._action_executed_val.setText(self._compact_text(text, 22))
+        self._action_executed_val.setText(self._compact_text(text, 18))
         self._action_executed_val.setToolTip(text)
 
     @pyqtSlot(str)
     def _on_voice_command_changed(self, command_text: str) -> None:
         text = command_text if command_text else '—'
-        self._voice_command_val.setText(self._compact_text(text, 22))
+        self._voice_command_val.setText(self._compact_text(text, 18))
         self._voice_command_val.setToolTip(text)
 
     @pyqtSlot(bool, str)
     def _on_face_auth_changed(self, authorized: bool, status_text: str) -> None:
         full = status_text if status_text else 'Face Auth: Idle'
-        self._face_auth_val.setText(self._compact_text(full, 28))
+        self._face_auth_val.setText(self._compact_text(full, 22))
         self._face_auth_val.setToolTip(full)
         neutral = 'system mode only' in full.lower()
         colour = TEXT_SEC if neutral else (ACTIVE if authorized else INACTIVE)
         self._face_auth_val.setStyleSheet(
-            f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+            f'color: {colour}; font-size: 12px; font-weight: 700; background: transparent; border: none;'
         )
 
     @pyqtSlot(float)
@@ -789,7 +887,7 @@ class VisionPanel(QWidget):
         else:
             colour = INACTIVE
         self._gesture_state_val.setStyleSheet(
-            f'color: {colour}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+            f'color: {colour}; font-size: 12px; font-weight: 600; background: transparent; border: none;'
         )
 
     @pyqtSlot(bool, str)
@@ -800,7 +898,7 @@ class VisionPanel(QWidget):
         self._activation_lock_val.setText(text)
         self._activation_lock_val.setToolTip(details)
         self._activation_lock_val.setStyleSheet(
-            f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+            f'color: {colour}; font-size: 12px; font-weight: 700; background: transparent; border: none;'
         )
 
     @pyqtSlot(str, str)
@@ -828,13 +926,13 @@ class VisionPanel(QWidget):
         self._failsafe_state_val.setText(state_label)
         self._failsafe_state_val.setToolTip(feedback)
         self._failsafe_state_val.setStyleSheet(
-            f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+            f'color: {colour}; font-size: 12px; font-weight: 700; background: transparent; border: none;'
         )
 
-        self._failsafe_feedback_val.setText(self._compact_text(feedback, 38))
+        self._failsafe_feedback_val.setText(self._compact_text(feedback, 30))
         self._failsafe_feedback_val.setToolTip(feedback)
         self._failsafe_feedback_val.setStyleSheet(
-            f'color: {colour}; font-size: 13px; font-weight: 600; background: transparent; border: none;'
+            f'color: {colour}; font-size: 12px; font-weight: 600; background: transparent; border: none;'
         )
 
     @pyqtSlot(str, str)
@@ -848,7 +946,7 @@ class VisionPanel(QWidget):
         self._runtime_state_val.setText(runtime_state)
         self._runtime_state_val.setToolTip(reason or runtime_state)
         self._runtime_state_val.setStyleSheet(
-            f'color: {colour}; font-size: 13px; font-weight: 700; background: transparent; border: none;'
+            f'color: {colour}; font-size: 12px; font-weight: 700; background: transparent; border: none;'
         )
 
     @pyqtSlot(bool)
@@ -857,6 +955,46 @@ class VisionPanel(QWidget):
         self._cam_frame.setStyleSheet(
             f'QFrame#cam_frame {{ background-color: #000000; border: 2px solid {colour}; border-radius: 16px; }}'
         )
+
+    def _toggle_face_lock(self) -> None:
+        enabled = not self._state.face_security_enabled
+        self._state.set_face_security_enabled(enabled)
+
+    def _toggle_gestures(self) -> None:
+        enabled = not self._state.gesture_control_enabled
+        self._state.set_gesture_control_enabled(enabled)
+
+    def _reset_tracking_state(self) -> None:
+        self._state.set_mode_stability(0.0)
+        self._state.emit_log(time.strftime('%H:%M:%S'), 'SYSTEM', 'Tracking state reset from dashboard control')
+
+    @pyqtSlot(bool)
+    def _on_face_lock_state(self, enabled: bool) -> None:
+        self._face_lock_btn.setText('Face Lock: ON' if enabled else 'Face Lock: OFF')
+        if enabled:
+            self._face_lock_btn.setStyleSheet(
+                f'QPushButton {{ background: rgba(51,230,168,0.12); color: {ACTIVE}; border: 1px solid {ACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+                f'QPushButton:hover {{ background: rgba(51,230,168,0.24); }}'
+            )
+        else:
+            self._face_lock_btn.setStyleSheet(
+                f'QPushButton {{ background: rgba(255,107,135,0.12); color: {INACTIVE}; border: 1px solid {INACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+                f'QPushButton:hover {{ background: rgba(255,107,135,0.24); }}'
+            )
+
+    @pyqtSlot(bool)
+    def _on_gesture_control_state(self, enabled: bool) -> None:
+        self._gesture_btn.setText('Gestures: ON' if enabled else 'Gestures: OFF')
+        if enabled:
+            self._gesture_btn.setStyleSheet(
+                f'QPushButton {{ background: rgba(51,230,168,0.12); color: {ACTIVE}; border: 1px solid {ACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+                f'QPushButton:hover {{ background: rgba(51,230,168,0.24); }}'
+            )
+        else:
+            self._gesture_btn.setStyleSheet(
+                f'QPushButton {{ background: rgba(255,107,135,0.12); color: {INACTIVE}; border: 1px solid {INACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+                f'QPushButton:hover {{ background: rgba(255,107,135,0.24); }}'
+            )
 
 
 # ===========================================================================
@@ -2947,37 +3085,48 @@ class MainWindow(QMainWindow):
         # Settings tab view
         self._settings_panel = SettingsPanel(self._state, self._config_manager)
 
-        # Stack: index 0 = main view, index 1 = gesture mapping, index 2 = help, index 3 = settings
+        # Logs tab view
+        self._logs_panel = QWidget()
+        logs_lay = QVBoxLayout(self._logs_panel)
+        logs_lay.setContentsMargins(20, 16, 20, 16)
+        logs_lay.setSpacing(8)
+        logs_title = QLabel('LIVE LOG STREAM')
+        logs_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 14px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        logs_lay.addWidget(logs_title)
+        self._activity = ActivityLog(self._state, compact=False)
+        logs_lay.addWidget(self._activity, stretch=1)
+
+        # Stack: index 0 = main view, index 1 = gesture mapping, index 2 = help, index 3 = settings, index 4 = logs
         self._body_stack = QStackedWidget()
         self._body_stack.addWidget(main_view)
         self._body_stack.addWidget(self._gesture_map_panel)
         self._body_stack.addWidget(self._help_panel)
         self._body_stack.addWidget(self._settings_panel)
+        self._body_stack.addWidget(self._logs_panel)
 
         body.addWidget(self._sidebar)
         body.addWidget(self._body_stack, stretch=1)
         root.addLayout(body, stretch=1)
-
-        self._activity = ActivityLog(self._state)
-        root.addWidget(self._activity)
 
     @pyqtSlot(str)
     def _on_tab_selected(self, tab_id: str) -> None:
         if tab_id == 'gestures':
             self._gesture_map_panel.reload()
             self._body_stack.setCurrentIndex(1)
-            self._activity.setVisible(False)
+        elif tab_id == 'mode':
+            self._body_stack.setCurrentIndex(0)
+        elif tab_id == 'logs':
+            self._body_stack.setCurrentIndex(4)
         elif tab_id == 'help':
             self._help_panel.refresh()
             self._body_stack.setCurrentIndex(2)
-            self._activity.setVisible(False)
         elif tab_id == 'settings':
             self._settings_panel.refresh()
             self._body_stack.setCurrentIndex(3)
-            self._activity.setVisible(False)
         else:
             self._body_stack.setCurrentIndex(0)
-            self._activity.setVisible(True)
 
     @pyqtSlot()
     def _on_mapping_changed(self) -> None:
@@ -2987,37 +3136,47 @@ class MainWindow(QMainWindow):
 
     def _build_header(self) -> QWidget:
         header = QWidget()
-        header.setFixedHeight(52)
+        header.setFixedHeight(64)
         header.setStyleSheet(
             f'background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, '
-            f'stop:0 #111A2B, stop:1 #1A2031); border-bottom: 1px solid {BORDER};'
+            f'stop:0 #0F1A2E, stop:1 #111F36); border-bottom: 1px solid rgba(123,233,255,0.16);'
         )
         lay = QHBoxLayout(header)
         lay.setContentsMargins(20, 0, 20, 0)
-        lay.setSpacing(12)
+        lay.setSpacing(10)
 
         dot = QLabel('◉')
         dot.setStyleSheet(f'color: {ACCENT}; font-size: 14px;')
         self._header_dot = dot
 
         title = QLabel('MMGI')
-        title.setStyleSheet(f'color: {ACCENT}; font-size: 15px; font-weight: 800; letter-spacing: 4px;')
+        title.setStyleSheet(f'color: {ACCENT_SOFT}; font-size: 16px; font-weight: 800; letter-spacing: 4px;')
 
-        subtitle = QLabel('Smart Mode AI Controller')
+        subtitle = QLabel('Smart Mode AI Gesture Controller')
         subtitle.setStyleSheet(f'color: {TEXT_HINT}; font-size: 12px;')
 
-        self._header_status = QLabel('⬤  INACTIVE')
-        self._header_status.setStyleSheet(f'color: {INACTIVE}; font-size: 12px; font-weight: 600;')
+        self._header_status = QLabel('INACTIVE')
+        self._header_status.setStyleSheet(f'color: {INACTIVE}; font-size: 12px; font-weight: 700;')
+
+        self._status_dot = QLabel('●')
+        self._status_dot.setStyleSheet(f'color: {INACTIVE}; font-size: 12px;')
 
         self._header_mode = QLabel('APP MODE')
         self._header_mode.setStyleSheet(
             f'color: {ACCENT}; font-size: 11px; font-weight: 700; letter-spacing: 1px; '
-            f'background: rgba(34,211,238,0.12); border: 1px solid {ACCENT}; border-radius: 10px; padding: 2px 10px;'
+            f'background: rgba(56,221,248,0.12); border: 1px solid rgba(123,233,255,0.45); border-radius: 12px; padding: 3px 12px;'
         )
+
+        self._fps_stat = QLabel('FPS: --')
+        self._fps_stat.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; font-weight: 600;')
+        self._lat_stat = QLabel('Latency: -- ms')
+        self._lat_stat.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; font-weight: 600;')
 
         lay.addWidget(dot)
         lay.addWidget(title)
         lay.addWidget(subtitle)
+        lay.addStretch()
+        lay.addWidget(self._header_mode)
         lay.addStretch()
 
         self._start_btn = QPushButton('Start')
@@ -3053,11 +3212,15 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._start_btn)
         lay.addWidget(self._stop_btn)
         lay.addWidget(self._restart_btn)
-        lay.addWidget(self._header_mode)
+        lay.addWidget(self._fps_stat)
+        lay.addWidget(self._lat_stat)
+        lay.addWidget(self._status_dot)
         lay.addWidget(self._header_status)
 
         self._state.system_active_changed.connect(self._on_active_header)
         self._state.mode_changed.connect(self._on_mode_header)
+        self._state.fps_changed.connect(self._on_fps_header)
+        self._state.latency_changed.connect(self._on_latency_header)
         self._lifecycle.state_changed.connect(self._on_lifecycle_state_changed)
         return header
 
@@ -3097,11 +3260,13 @@ class MainWindow(QMainWindow):
     @pyqtSlot(bool)
     def _on_active_header(self, active: bool) -> None:
         if active:
-            self._header_status.setText('⬤  ACTIVE')
+            self._header_status.setText('ACTIVE')
             self._header_status.setStyleSheet(f'color: {ACTIVE}; font-size: 12px; font-weight: 600;')
+            self._status_dot.setStyleSheet(f'color: {ACTIVE}; font-size: 12px;')
         else:
-            self._header_status.setText('⬤  INACTIVE')
+            self._header_status.setText('INACTIVE')
             self._header_status.setStyleSheet(f'color: {INACTIVE}; font-size: 12px; font-weight: 600;')
+            self._status_dot.setStyleSheet(f'color: {INACTIVE}; font-size: 12px;')
 
     @pyqtSlot(str)
     def _on_mode_header(self, mode: str) -> None:
@@ -3111,8 +3276,16 @@ class MainWindow(QMainWindow):
         self._header_mode.setText(short)
         self._header_mode.setStyleSheet(
             f'color: {colour}; font-size: 11px; font-weight: 700; letter-spacing: 1px; '
-            f'background: rgba(0,229,255,0.10); border: 1px solid {colour}; border-radius: 10px; padding: 2px 10px;'
+            f'background: rgba(56,221,248,0.12); border: 1px solid {colour}; border-radius: 12px; padding: 3px 12px;'
         )
+
+    @pyqtSlot(float)
+    def _on_fps_header(self, fps: float) -> None:
+        self._fps_stat.setText(f'FPS: {fps:.0f}')
+
+    @pyqtSlot(float)
+    def _on_latency_header(self, ms: float) -> None:
+        self._lat_stat.setText(f'Latency: {ms:.0f} ms')
 
     @pyqtSlot(str)
     def _on_worker_error(self, msg: str) -> None:

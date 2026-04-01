@@ -65,6 +65,8 @@ class SharedState(QObject):
     runtime_state_changed = pyqtSignal(str, str)
     fail_safe_state_changed = pyqtSignal(str, str)
     fail_safe_flags_changed = pyqtSignal(dict)
+    adaptive_auth_feedback_changed = pyqtSignal(str)
+    user_state_changed = pyqtSignal(str)
 
     # Batched update – emits a snapshot dict for panels that want everything
     snapshot_ready          = pyqtSignal(dict)
@@ -116,6 +118,8 @@ class SharedState(QObject):
             'AUTH_REQUIRED': False,
             'COOLDOWN_ACTIVE': False,
         }
+        self._adaptive_auth_feedback = 'Executed'
+        self._user_state = 'open'
 
     # ------------------------------------------------------------------ getters
     @property
@@ -170,6 +174,10 @@ class SharedState(QObject):
     def fail_safe_message(self) -> str: return self._fail_safe_message
     @property
     def fail_safe_flags(self) -> dict: return dict(self._fail_safe_flags)
+    @property
+    def adaptive_auth_feedback(self) -> str: return self._adaptive_auth_feedback
+    @property
+    def user_state(self) -> str: return self._user_state
 
     # ------------------------------------------------------------------ setters
     def set_system_active(self, value: bool) -> None:
@@ -353,6 +361,18 @@ class SharedState(QObject):
         self._metrics = payload
         self.metrics_changed.emit(dict(payload))
 
+    def set_adaptive_auth_feedback(self, value: str) -> None:
+        feedback = str(value)
+        if self._adaptive_auth_feedback != feedback:
+            self._adaptive_auth_feedback = feedback
+            self.adaptive_auth_feedback_changed.emit(feedback)
+
+    def set_user_state(self, value: str) -> None:
+        state = str(value).lower()
+        if self._user_state != state:
+            self._user_state = state
+            self.user_state_changed.emit(state)
+
     def emit_log(self, timestamp: str, category: str, description: str) -> None:
         """Convenience wrapper to push an activity log event."""
         self.log_event.emit(timestamp, category, description)
@@ -387,6 +407,8 @@ class SharedState(QObject):
             'fail_safe_state': self._fail_safe_state,
             'fail_safe_message': self._fail_safe_message,
             'fail_safe_flags': dict(self._fail_safe_flags),
+            'adaptive_auth_feedback': self._adaptive_auth_feedback,
+            'user_state': self._user_state,
         }
 
     def _emit_snapshot(self) -> None:

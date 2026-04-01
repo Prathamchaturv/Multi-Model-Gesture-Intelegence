@@ -231,7 +231,7 @@ class UnifiedDecisionPipeline:
 
         auth_result: FaceAuthResult | None = None
         face_is_verified = bool(face_verified) if face_verified is not None else True
-        if self._face_security is not None and frame_bgr is not None and face_verified is None:
+        if self._face_security is not None and face_verified is None:
             auth_result = self._face_security.evaluate(frame_bgr)
             face_is_verified = auth_result.is_authorized
             log_security_check(auth_result.is_authorized, auth_result.status_text)
@@ -239,7 +239,7 @@ class UnifiedDecisionPipeline:
         # Legacy compatibility path: preserve strict face blocking only when
         # adaptive authorization is not enabled.
         if self._authorization_engine is None and enforce_face_security and self._face_security is not None:
-            if auth_result is None and frame_bgr is not None:
+            if auth_result is None:
                 auth_result = self._face_security.evaluate(frame_bgr)
                 face_is_verified = auth_result.is_authorized
                 log_security_check(auth_result.is_authorized, auth_result.status_text)

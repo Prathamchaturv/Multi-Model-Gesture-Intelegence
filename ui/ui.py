@@ -598,9 +598,9 @@ class VisionPanel(QWidget):
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
         )
         fb_lay = QGridLayout(feedback_frame)
-        fb_lay.setContentsMargins(16, 16, 16, 16)
-        fb_lay.setHorizontalSpacing(8)
-        fb_lay.setVerticalSpacing(12)
+        fb_lay.setContentsMargins(14, 14, 14, 14)
+        fb_lay.setHorizontalSpacing(10)
+        fb_lay.setVerticalSpacing(10)
 
         chip_1, self._gesture_detected_val = self._make_status_chip('DETECTED GESTURE', TEXT_PRI)
         chip_2, self._action_executed_val = self._make_status_chip('FINAL ACTION', ACTIVE)
@@ -619,12 +619,11 @@ class VisionPanel(QWidget):
         fb_lay.addWidget(chip_5, 1, 1)
         fb_lay.addWidget(chip_6, 1, 2)
         fb_lay.addWidget(chip_7, 2, 0)
-        fb_lay.addWidget(chip_8, 2, 1, 1, 2)
-        fb_lay.addWidget(chip_9, 3, 0)
-        fb_lay.setRowMinimumHeight(0, 84)
-        fb_lay.setRowMinimumHeight(1, 84)
-        fb_lay.setRowMinimumHeight(2, 84)
-        fb_lay.setRowMinimumHeight(3, 84)
+        fb_lay.addWidget(chip_8, 2, 1)
+        fb_lay.addWidget(chip_9, 2, 2)
+        fb_lay.setRowStretch(0, 1)
+        fb_lay.setRowStretch(1, 1)
+        fb_lay.setRowStretch(2, 1)
         fb_lay.setColumnStretch(0, 1)
         fb_lay.setColumnStretch(1, 1)
         fb_lay.setColumnStretch(2, 1)
@@ -746,30 +745,30 @@ class VisionPanel(QWidget):
     @staticmethod
     def _make_status_chip(title: str, value_colour: str) -> tuple[QFrame, QLabel]:
         chip = QFrame()
-        chip.setFixedHeight(84)
+        chip.setFixedHeight(76)
         chip.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         chip.setStyleSheet(
             f'QFrame {{ background: rgba(138,138,160,0.08); border: 1px solid {BORDER}; border-radius: 10px; }}'
         )
         lay = QVBoxLayout(chip)
-        lay.setContentsMargins(12, 10, 12, 12)
-        lay.setSpacing(8)
+        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setSpacing(5)
 
         title_lbl = QLabel(title)
         title_lbl.setStyleSheet(
-            f'color: {TEXT_HINT}; font-size: 9px; font-weight: 600; letter-spacing: 1px; '
+            f'color: {TEXT_HINT}; font-size: 10px; font-weight: 600; letter-spacing: 1px; '
             f'background: transparent; border: none;'
         )
-        title_lbl.setFixedHeight(12)
+        title_lbl.setFixedHeight(14)
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         value_lbl = QLabel('—')
         value_lbl.setStyleSheet(
-            f'color: {value_colour}; font-size: 10px; font-weight: 700; background: transparent; border: none;'
+            f'color: {value_colour}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
         )
         value_lbl.setWordWrap(False)
         value_lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        value_lbl.setMinimumHeight(18)
-        value_lbl.setMaximumHeight(18)
+        value_lbl.setMinimumHeight(20)
+        value_lbl.setMaximumHeight(20)
         value_lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         lay.addWidget(title_lbl)

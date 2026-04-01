@@ -18,6 +18,7 @@ from enum import Enum
 import time
 
 from core.face_security import FaceAuthResult, FaceSecurityManager
+from engine.adaptive_authorization import AdaptiveAuthorizationEngine
 from engine.action_executor import ActionExecutor
 from engine.decision_engine import DecisionEngine
 from engine.runtime_controller import RuntimeController
@@ -56,6 +57,9 @@ class PipelineDecision:
     mode: str
     blocked_reason: str | None = None
     security_status: str | None = None
+    auth_feedback: str | None = None
+    user_state: str | None = None
+    risk_level: str | None = None
 
 
 @dataclass(frozen=True)
@@ -163,6 +167,7 @@ class UnifiedDecisionPipeline:
         action_executor: ActionExecutor,
         mode_manager: ModeManager,
         face_security: FaceSecurityManager | None = None,
+        authorization_engine: AdaptiveAuthorizationEngine | None = None,
         conflict_resolver: InputConflictResolver | None = None,
         runtime_controller: RuntimeController | None = None,
     ) -> None:
@@ -170,10 +175,18 @@ class UnifiedDecisionPipeline:
         self._action_executor = action_executor
         self._mode_manager = mode_manager
         self._face_security = face_security
+        self._authorization_engine = authorization_engine
         self._conflict_resolver = conflict_resolver or InputConflictResolver()
         self._runtime_controller = runtime_controller
 
-    def process_event(self, event: InputEvent, frame_bgr=None, enforce_face_security: bool = True) -> PipelineDecision:
+    def process_event(
+        self,
+        event: InputEvent,
+        frame_bgr=None,
+        enforce_face_security: bool = True,
+        face_security_enabled: bool = False,
+        face_verified: bool | None = None,
+    ) -> PipelineDecision:
         """Resolve, authorize, and execute exactly one normalized input event."""
         log_input_received(event.type, event.command, event.confidence)
 
@@ -216,10 +229,21 @@ class UnifiedDecisionPipeline:
                 blocked_reason='conflict_duplicate_ignored',
             )
 
-        if enforce_face_security and self._face_security is not None:
+        auth_result: FaceAuthResult | None = None
+        face_is_verified = bool(face_verified) if face_verified is not None else True
+        if self._face_security is not None and frame_bgr is not None and face_verified is None:
             auth_result = self._face_security.evaluate(frame_bgr)
+            face_is_verified = auth_result.is_authorized
             log_security_check(auth_result.is_authorized, auth_result.status_text)
-            if not auth_result.is_authorized:
+
+        # Legacy compatibility path: preserve strict face blocking only when
+        # adaptive authorization is not enabled.
+        if self._authorization_engine is None and enforce_face_security and self._face_security is not None:
+            if auth_result is None and frame_bgr is not None:
+                auth_result = self._face_security.evaluate(frame_bgr)
+                face_is_verified = auth_result.is_authorized
+                log_security_check(auth_result.is_authorized, auth_result.status_text)
+            if auth_result is not None and not auth_result.is_authorized:
                 return PipelineDecision(
                     action=None,
                     mode_changed=False,
@@ -243,6 +267,31 @@ class UnifiedDecisionPipeline:
                     blocked_reason=reason,
                 )
 
+        auth_feedback = None
+        user_state = None
+        risk_level = None
+        if self._authorization_engine is not None:
+            authz = self._authorization_engine.authorize(
+                action,
+                face_security_enabled=bool(face_security_enabled),
+                face_verified=face_is_verified,
+                timestamp=event.timestamp,
+            )
+            auth_feedback = authz.feedback
+            user_state = authz.user_state
+            risk_level = authz.risk_level
+            if not authz.execute:
+                return PipelineDecision(
+                    action=None,
+                    mode_changed=False,
+                    mode=self._mode_manager.current_mode,
+                    blocked_reason=authz.reason or 'adaptive_authorization_pending',
+                    security_status=auth_result.status_text if auth_result is not None else None,
+                    auth_feedback=auth_feedback,
+                    user_state=user_state,
+                    risk_level=risk_level,
+                )
+
         self._action_executor.execute(action)
         if self._runtime_controller is not None:
             self._runtime_controller.mark_action_executed()
@@ -253,4 +302,8 @@ class UnifiedDecisionPipeline:
             action=action,
             mode_changed=False,
             mode=self._mode_manager.current_mode,
+            security_status=auth_result.status_text if auth_result is not None else None,
+            auth_feedback=auth_feedback,
+            user_state=user_state,
+            risk_level=risk_level,
         )

@@ -53,6 +53,7 @@ from core.voice_control          import VoiceCommandListener
 from engine.activation_manager   import ActivationManager
 from engine.decision_engine      import DecisionEngine
 from engine.action_executor      import ActionExecutor
+from engine.adaptive_authorization import AdaptiveAuthorizationEngine
 from engine.metrics_manager      import MetricsManager
 from engine.multimodal_fusion    import MultimodalFusionLayer
 from engine.runtime_controller    import RuntimeController, RuntimeState
@@ -528,11 +529,16 @@ class WorkerThread(QThread):
                 'brave_path':        config.get('apps.brave_path'),
                 'apple_music_aumid': config.get('apps.apple_music_aumid'),
             })
+            configured_risk_map = config.get('authorization.action_risk_map', None)
+            if not isinstance(configured_risk_map, dict):
+                configured_risk_map = None
+            auth_engine = AdaptiveAuthorizationEngine(action_risk_map=configured_risk_map)
             unified_pipeline = UnifiedDecisionPipeline(
                 decision_engine=decision_engine,
                 action_executor=action_executor,
                 mode_manager=mode_manager,
                 face_security=face_security_manager,
+                authorization_engine=auth_engine,
                 runtime_controller=runtime_controller,
             )
             fusion_layer = MultimodalFusionLayer()
@@ -552,8 +558,6 @@ class WorkerThread(QThread):
             uncertainty_lock_was_active = False
             last_safety_lock_log = 0.0
             last_face_auth_signature: tuple[bool, str] | None = None
-            face_lock_forced_off = False
-            face_reactivation_locked = False
             voice_backoff_until = 0.0
             latest_face_detected = True
             face_eval_failures = 0
@@ -606,6 +610,7 @@ class WorkerThread(QThread):
             log_lifecycle_event('pipeline', 'started', 'Worker loop active')
             state.set_face_auth(True, 'Face Security: Login Only')
             state.set_activation_lock(True, 'Waiting for stable gesture')
+            state.set_adaptive_auth_feedback('Executed')
 
             # ----------------------------------------------------------------
             # Frame loop
@@ -716,7 +721,7 @@ class WorkerThread(QThread):
                 voice_enabled_for_fusion = bool(state.voice_listener_enabled) and voice_listener is not None and voice_listener.is_enabled
                 gesture_processing_enabled = bool(state.gesture_control_enabled)
                 face_security_enabled = bool(state.face_security_enabled)
-                runtime_face_security_active = face_security_enabled and mode_manager.current_mode == 'System Mode'
+                face_role_provider_active = face_security_enabled and face_security_manager is not None
 
                 if bool(state.voice_listener_enabled) and (voice_listener is None or not voice_listener.is_enabled):
                     if time.time() >= voice_retry_at:
@@ -780,7 +785,7 @@ class WorkerThread(QThread):
                 face_authorized = True
                 face_status = face_security_manager.setup_status_text
                 latest_face_detected = True
-                if runtime_face_security_active and (system_is_active or face_reactivation_locked):
+                if face_role_provider_active:
                     try:
                         face_result = face_security_manager.evaluate(frame)
                         face_eval_failures = 0
@@ -800,8 +805,8 @@ class WorkerThread(QThread):
                         face_eval_failures += 1
                         face_authorized = False
                         latest_face_detected = False
-                        face_status = 'LOCKED | Face detection failure - access blocked'
-                        state.emit_log(_ts(), 'ERROR', 'Face detection failure, access blocked')
+                        face_status = 'LOCKED | Face detection failure'
+                        state.emit_log(_ts(), 'ERROR', 'Face detection failure, adaptive controls elevated')
                         log_runtime_error(f'Face detection failure: {exc}')
                         if face_eval_failures >= 3 and time.time() >= face_recovery_retry_at:
                             face_recovery_retry_at = time.time() + 2.0
@@ -825,15 +830,19 @@ class WorkerThread(QThread):
                                 face_eval_failures = 0
                             except Exception as reinit_exc:
                                 log_runtime_error(f'Face security recovery failed: {reinit_exc}')
-                elif system_is_active and not runtime_face_security_active:
+                elif system_is_active and not face_role_provider_active:
                     face_authorized = True
-                    face_status = 'UNLOCKED | Runtime face security inactive'
+                    face_status = 'UNLOCKED | Face role provider inactive'
                     latest_face_detected = True
                 else:
                     face_authorized = True
                     face_status = 'Face Auth: System Inactive'
                     latest_face_detected = True
                 state.set_face_auth(face_authorized, face_status)
+                if face_security_enabled:
+                    state.set_user_state('trusted' if face_authorized else 'restricted')
+                else:
+                    state.set_user_state('open')
 
                 # ----------------------------------------------------------
                 # Hand detection + gesture classification
@@ -1027,31 +1036,11 @@ class WorkerThread(QThread):
                 # Activation manager + unified event pipeline
                 # ----------------------------------------------------------
                 gesture_for_activation = effective_gesture
-                if face_reactivation_locked and runtime_face_security_active and not face_authorized:
-                    # Keep the system inactive until face auth recovers.
-                    gesture_for_activation = None
 
                 should_execute = activation_manager.update(gesture_for_activation)
                 state.set_system_active(activation_manager.is_active)
                 state.set_cooldown(activation_manager.is_in_cooldown)
                 system_is_active = activation_manager.is_active
-
-                if face_reactivation_locked and face_authorized:
-                    face_reactivation_locked = False
-                    face_lock_forced_off = False
-                    state.emit_log(_ts(), 'SECURITY', 'Face authorized again: system can be activated')
-
-                if system_is_active and runtime_face_security_active and not face_authorized:
-                    activation_manager.force_inactive('Face not authorized')
-                    should_execute = False
-                    system_is_active = False
-                    state.set_system_active(False)
-                    if not face_lock_forced_off:
-                        state.emit_log(_ts(), 'SECURITY', 'System turned OFF: face authorization locked')
-                    face_lock_forced_off = True
-                    face_reactivation_locked = True
-                elif face_authorized:
-                    face_lock_forced_off = False
 
                 pending_events = []
                 gesture_event = None
@@ -1177,8 +1166,6 @@ class WorkerThread(QThread):
                 if runtime_locked_reason is None:
                     if not gesture_processing_enabled:
                         runtime_locked_reason = 'Gesture control disabled'
-                    elif (system_is_active or face_reactivation_locked) and runtime_face_security_active and not face_authorized:
-                        runtime_locked_reason = 'Face authorization required'
                     elif gesture_verification_status != 'Stable':
                         runtime_locked_reason = 'Waiting for stable gesture'
 
@@ -1193,32 +1180,43 @@ class WorkerThread(QThread):
                     if forced_action is not None:
                         allowed, blocked_reason = runtime_controller.can_execute_action(
                             action=forced_action,
-                            face_authorized=face_authorized,
+                            face_authorized=True,
                             activation_locked=bool(runtime_locked_reason),
                             confidence=confidence,
                         )
                         if not allowed:
                             state.emit_log(_ts(), 'SYSTEM', f'Runtime blocked action: {blocked_reason}')
                             continue
-                        if system_is_active:
-                            auth = face_security_manager.evaluate(frame) if (face_security_manager is not None and runtime_face_security_active) else None
-                            if auth is not None and not auth.is_authorized:
-                                metrics.record_activation_attempt(succeeded=False)
-                                state.emit_log(_ts(), 'SECURITY', f'Blocked action while system active: {auth.status_text}')
+
+                        authz = auth_engine.authorize(
+                            forced_action,
+                            face_security_enabled=face_security_enabled,
+                            face_verified=face_authorized,
+                        )
+                        state.set_adaptive_auth_feedback(authz.feedback)
+                        if not authz.execute:
+                            metrics.record_activation_attempt(succeeded=False)
+                            state.emit_log(_ts(), 'SYSTEM', f'Adaptive control: {authz.feedback} ({forced_action})')
+                            if authz.feedback == 'Access Controlled':
+                                state.emit_log(_ts(), 'SECURITY', f'Access Controlled: {forced_action}')
                                 continue
+
                         action_executor.execute(forced_action)
                         runtime_controller.mark_action_executed()
                         metrics.record_activation_attempt(succeeded=True)
                         label = action_executor._LABELS.get(forced_action, forced_action)
                         state.emit_log(_ts(), 'ACTION', f'{label}  [{source_label}]')
                         state.set_action_executed(forced_action)
+                        state.set_adaptive_auth_feedback('Executed')
                         log_action_executed(label)
                         continue
 
                     result = unified_pipeline.process_event(
                         event,
                         frame_bgr=frame,
-                        enforce_face_security=runtime_face_security_active and system_is_active,
+                        enforce_face_security=False,
+                        face_security_enabled=face_security_enabled,
+                        face_verified=face_authorized,
                     )
 
                     if result.mode_changed:
@@ -1229,15 +1227,25 @@ class WorkerThread(QThread):
                             state.request_mode(result.mode)
                         state.emit_log(_ts(), 'MODE', f'Switched to {result.mode}')
 
+                    if result.auth_feedback:
+                        state.set_adaptive_auth_feedback(result.auth_feedback)
+
                     if result.blocked_reason == 'face_unauthorized':
                         metrics.record_activation_attempt(succeeded=False)
                         state.emit_log(_ts(), 'SECURITY', f'Blocked action while system active: {result.security_status}')
+                    elif result.blocked_reason:
+                        metrics.record_activation_attempt(succeeded=False)
+                        if result.auth_feedback == 'Access Controlled':
+                            state.emit_log(_ts(), 'SECURITY', f'Access Controlled: {event.command}')
+                        else:
+                            state.emit_log(_ts(), 'SYSTEM', f'Adaptive control: {result.auth_feedback or result.blocked_reason}')
 
                     if result.action:
                         metrics.record_activation_attempt(succeeded=True)
                         label = action_executor._LABELS.get(result.action, result.action)
                         state.emit_log(_ts(), 'ACTION', f'{label}  [{source_label}]')
                         state.set_action_executed(result.action)
+                        state.set_adaptive_auth_feedback(result.auth_feedback or 'Executed')
                         log_action_executed(label)
 
                 decision_engine.current_mode = mode_manager.current_mode
@@ -1252,9 +1260,6 @@ class WorkerThread(QThread):
                 elif time.time() < uncertainty_lock_until:
                     activation_locked = True
                     lock_reason = 'Uncertain gesture input'
-                elif (system_is_active or face_reactivation_locked) and runtime_face_security_active and not face_authorized:
-                    activation_locked = True
-                    lock_reason = 'Face not authorized'
                 elif gesture_verification_status != 'Stable':
                     activation_locked = True
                     lock_reason = 'Waiting for stable gesture'
@@ -1262,15 +1267,11 @@ class WorkerThread(QThread):
 
                 low_confidence_active = bool(hand_data) and gesture_processing_enabled and confidence < low_conf_threshold
                 no_face_detected_active = (
-                    runtime_face_security_active
-                    and (system_is_active or face_reactivation_locked)
+                    face_role_provider_active
+                    and system_is_active
                     and (not latest_face_detected)
                 )
-                auth_required_active = (
-                    runtime_face_security_active
-                    and (system_is_active or face_reactivation_locked)
-                    and (not face_authorized)
-                )
+                auth_required_active = False
                 cooldown_active = runtime_controller.is_cooldown_active and (not activation_locked)
 
                 state.set_fail_safe_states(

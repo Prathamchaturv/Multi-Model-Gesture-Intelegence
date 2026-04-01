@@ -57,7 +57,7 @@
     }
   },
   "thresholds": {
-    "hand_detection_confidence": 0.7,
+    "hand_detection_confidence": 0.78,
     "hand_tracking_confidence": 0.5,
     "gesture_stability_frames": 10,
     "voice_confidence": 0.8,

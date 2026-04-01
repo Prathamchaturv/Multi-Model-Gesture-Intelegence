@@ -566,6 +566,10 @@ class WorkerThread(QThread):
             model_recovery_retry_at = 0.0
             camera_read_failures = 0
             camera_recovery_retry_at = 0.0
+            last_face_eval_ts = 0.0
+            cached_face_authorized = True
+            cached_face_status = 'Face Auth: Idle'
+            cached_face_detected = True
 
             warning_interval = 1.5
             error_interval = 1.5
@@ -575,6 +579,21 @@ class WorkerThread(QThread):
             max_inference_fps = max(1.0, float(config.get('pipeline.max_inference_fps', 30.0) or 30.0))
             frame_time_budget_ms = max(1.0, float(config.get('pipeline.frame_time_budget_ms', 33.0) or 33.0))
             latest_gesture_ttl_s = max(0.05, float(config.get('pipeline.latest_gesture_ttl_s', 0.25) or 0.25))
+            processing_scale = max(0.5, min(1.0, float(config.get('pipeline.processing_scale', 0.75) or 0.75)))
+            face_processing_scale = max(0.4, min(1.0, float(config.get('pipeline.face_processing_scale', 0.65) or 0.65)))
+            face_role_eval_interval_s = max(0.05, float(config.get('pipeline.face_role_eval_interval_s', 0.20) or 0.20))
+            adaptive_perf_enabled = bool(config.get('pipeline.adaptive_performance_enabled', True))
+            adaptive_target_latency_ms = max(8.0, float(config.get('pipeline.adaptive_target_latency_ms', 28.0) or 28.0))
+            adaptive_adjust_interval_s = max(0.25, float(config.get('pipeline.adaptive_adjust_interval_s', 1.0) or 1.0))
+            adaptive_scale_step = max(0.01, float(config.get('pipeline.adaptive_scale_step', 0.05) or 0.05))
+            adaptive_min_scale = max(0.45, min(0.95, float(config.get('pipeline.adaptive_min_scale', 0.55) or 0.55)))
+            adaptive_max_scale = max(adaptive_min_scale, min(1.0, float(config.get('pipeline.adaptive_max_scale', 0.95) or 0.95)))
+
+            current_processing_scale = processing_scale
+            current_face_processing_scale = face_processing_scale
+            current_face_eval_interval_s = face_role_eval_interval_s
+            adaptive_latency_ema: float | None = None
+            adaptive_last_adjust_ts = 0.0
 
             frame_queue: deque[tuple[float, object]] = deque(maxlen=frame_queue_size)
             inference_interval_s = 1.0 / max_inference_fps
@@ -787,20 +806,36 @@ class WorkerThread(QThread):
                 latest_face_detected = True
                 if face_role_provider_active:
                     try:
-                        face_result = face_security_manager.evaluate(frame)
-                        face_eval_failures = 0
-                        face_authorized = face_result.is_authorized
-                        latest_face_detected = bool(face_result.face_detected)
-                        prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
-                        face_status = f'{prefix} | {face_result.status_text}'
-                        signature = (face_result.is_authorized, face_result.status_text)
-                        if signature != last_face_auth_signature:
-                            last_face_auth_signature = signature
-                            log_face_authorization_event(
-                                face_result.is_authorized,
-                                face_result.status_text,
-                                face_result.similarity,
-                            )
+                        now_face = time.time()
+                        if (now_face - last_face_eval_ts) >= current_face_eval_interval_s:
+                            face_eval_frame = frame
+                            if current_face_processing_scale < 0.999:
+                                face_eval_frame = cv2.resize(
+                                    frame,
+                                    None,
+                                    fx=current_face_processing_scale,
+                                    fy=current_face_processing_scale,
+                                    interpolation=cv2.INTER_LINEAR,
+                                )
+                            face_result = face_security_manager.evaluate(face_eval_frame)
+                            last_face_eval_ts = now_face
+                            face_eval_failures = 0
+                            cached_face_authorized = face_result.is_authorized
+                            cached_face_detected = bool(face_result.face_detected)
+                            prefix = 'UNLOCKED' if face_result.is_authorized else 'LOCKED'
+                            cached_face_status = f'{prefix} | {face_result.status_text}'
+                            signature = (face_result.is_authorized, face_result.status_text)
+                            if signature != last_face_auth_signature:
+                                last_face_auth_signature = signature
+                                log_face_authorization_event(
+                                    face_result.is_authorized,
+                                    face_result.status_text,
+                                    face_result.similarity,
+                                )
+
+                        face_authorized = cached_face_authorized
+                        latest_face_detected = cached_face_detected
+                        face_status = cached_face_status
                     except Exception as exc:
                         face_eval_failures += 1
                         face_authorized = False
@@ -848,11 +883,20 @@ class WorkerThread(QThread):
                 # Hand detection + gesture classification
                 # ----------------------------------------------------------
                 skip_hand_processing = not gesture_processing_enabled
+                inference_frame = frame
+                if current_processing_scale < 0.999:
+                    inference_frame = cv2.resize(
+                        frame,
+                        None,
+                        fx=current_processing_scale,
+                        fy=current_processing_scale,
+                        interpolation=cv2.INTER_LINEAR,
+                    )
                 detection_result = None
                 hands_info = {}
                 if not skip_hand_processing:
                     try:
-                        detection_result = hand_tracker.detect_hands(frame)
+                        detection_result = hand_tracker.detect_hands(inference_frame)
                         hands_info = hand_tracker.get_hands_info(detection_result)
                     except Exception as exc:
                         model_failures += 1
@@ -1287,13 +1331,50 @@ class WorkerThread(QThread):
                 fps_counter.update()
                 latency_ms = (time.perf_counter() - t_start) * 1000
 
+                if adaptive_perf_enabled:
+                    if adaptive_latency_ema is None:
+                        adaptive_latency_ema = latency_ms
+                    else:
+                        adaptive_latency_ema = (adaptive_latency_ema * 0.85) + (latency_ms * 0.15)
+
+                    now_adaptive = time.time()
+                    if (now_adaptive - adaptive_last_adjust_ts) >= adaptive_adjust_interval_s:
+                        adaptive_last_adjust_ts = now_adaptive
+                        old_scale = current_processing_scale
+                        upper = adaptive_target_latency_ms + 6.0
+                        lower = adaptive_target_latency_ms - 6.0
+
+                        if adaptive_latency_ema > upper and current_processing_scale > adaptive_min_scale:
+                            current_processing_scale = max(adaptive_min_scale, current_processing_scale - adaptive_scale_step)
+                            current_face_processing_scale = max(0.4, min(1.0, current_processing_scale - 0.10))
+                            current_face_eval_interval_s = min(0.35, current_face_eval_interval_s + 0.03)
+                        elif (
+                            adaptive_latency_ema < lower
+                            and not frame_budget_alert_active
+                            and current_processing_scale < adaptive_max_scale
+                        ):
+                            current_processing_scale = min(adaptive_max_scale, current_processing_scale + adaptive_scale_step)
+                            current_face_processing_scale = max(0.4, min(1.0, current_processing_scale - 0.10))
+                            current_face_eval_interval_s = max(face_role_eval_interval_s, current_face_eval_interval_s - 0.02)
+
+                        if abs(current_processing_scale - old_scale) >= 0.01:
+                            state.emit_log(
+                                _ts(),
+                                'SYSTEM',
+                                (
+                                    f'Adaptive perf: scale={current_processing_scale:.2f}, '
+                                    f'latency={adaptive_latency_ema:.1f}ms'
+                                ),
+                            )
+
                 state.set_gesture(ui_gesture_text)
                 state.set_confidence(confidence)
                 state.set_fps(fps_counter.fps)
                 state.set_latency(latency_ms)
                 metrics.record_latency(latency_ms)
                 frame_index += 1
-                log_frame_latency(frame_index, latency_ms, fps_counter.fps, mode_manager.current_mode)
+                if frame_index % 3 == 0:
+                    log_frame_latency(frame_index, latency_ms, fps_counter.fps, mode_manager.current_mode)
                 snap = metrics.flush_report()
                 state.set_metrics({
                     'gesture_accuracy_pct': snap.gesture_accuracy_pct,
@@ -1309,6 +1390,7 @@ class WorkerThread(QThread):
                 if profile.debug_overlay_enabled:
                     debug_text = (
                         f'Debug | Sens:{state.cursor_sensitivity:.2f} '
+                        f'Scale:{current_processing_scale:.2f} '
                         f'Acc:{snap.gesture_accuracy_pct:.1f}% '
                         f'FalseAct:{snap.false_activation_rate_pct:.1f}% '
                         f'AvgLat:{snap.avg_response_latency_ms:.1f}ms'

@@ -86,6 +86,15 @@ class Config:
             'frame_time_budget_ms': 33.0,
             'latest_gesture_ttl_s': 0.25,
             'action_confirm_frames': 1,
+            'processing_scale': 0.75,
+            'face_processing_scale': 0.65,
+            'face_role_eval_interval_s': 0.20,
+            'adaptive_performance_enabled': True,
+            'adaptive_target_latency_ms': 28.0,
+            'adaptive_adjust_interval_s': 1.0,
+            'adaptive_scale_step': 0.05,
+            'adaptive_min_scale': 0.55,
+            'adaptive_max_scale': 0.95,
         },
     }
 

@@ -14,7 +14,7 @@ Most gesture demos fail in practical usage because they lack runtime safety, ove
 MMGI combines computer vision, multimodal command input, runtime policy control, and UI observability into a single production-oriented architecture:
 - Gesture input: MediaPipe + OpenCV
 - Voice input: threaded listener with command normalization
-- Safety gates: activation protocol, confidence checks, face authorization
+- Safety gates: activation protocol, confidence checks, adaptive authorization
 - Action layer: centralized executor for OS-level commands
 - UI layer: PyQt6 dashboard with live runtime state and diagnostics
 
@@ -38,9 +38,23 @@ Input (Gesture / Voice)
 -> Input Event Normalizer
 -> DecisionEngine (mode map + whitelist)
 -> RuntimeController (confidence/cooldown policy)
--> FaceSecurityManager (when enforced)
+-> AdaptiveAuthorizationEngine (risk + context aware)
 -> ActionExecutor
 -> SharedState + UI + logs
+
+### Global Adaptive Authorization
+MMGI now applies an adaptive authorization stage globally across App Mode, Media Mode, and System Mode.
+
+- Face auth acts as a role provider, not a hard blocker.
+- User states:
+    - Open Mode: face auth OFF
+    - Restricted Mode: face auth ON but user not verified
+    - Trusted/Admin Mode: face auth verified
+- Risk levels:
+    - Low risk: execute immediately
+    - Medium risk: frame-based stability confirmation
+    - High risk: stability + hold confirmation, with partial restriction in Restricted mode
+- UI feedback values: Executed, Stabilizing..., Hold to Confirm, Access Controlled
 
 ---
 
@@ -76,7 +90,7 @@ MMGI uses clear component boundaries:
 3. GestureClassifier resolves a gesture label.
 4. DecisionEngine maps gesture or voice command to action/mode intent.
 5. ActivationManager and RuntimeController verify readiness, confidence, cooldown, and lock state.
-6. FaceSecurityManager gates sensitive actions when policy is active.
+6. AdaptiveAuthorizationEngine applies risk-aware confirmation using user context and face role state.
 7. ActionExecutor performs OS-level behavior (application launch, media key, input control).
 8. SharedState publishes updates to Vision panel, System panel, and Activity log.
 
@@ -114,7 +128,7 @@ MMGI is built to fail safely and recover predictably.
 - Camera failures: retry and recovery loop with runtime state transition.
 - Gesture model failures: fallback and component reinitialization path.
 - Voice failures: backoff and retry window to avoid thrashing.
-- Face authorization failures: action blocking and explicit security status.
+- Face authorization failures: adaptive risk escalation and explicit security status.
 
 ### Stability Strategies
 - Confidence-based rejection for low-quality detections.
@@ -130,8 +144,8 @@ MMGI is built to fail safely and recover predictably.
 - Multimodal command support (gesture + voice) through a unified decision pipeline.
 - Mode-aware command system: App Mode, Media Mode, System Mode.
 - System Mode uses scroll and click gestures (cursor movement is intentionally disabled).
-- Face-based authorization gate for protected execution contexts.
-- Runtime fail-safe states surfaced in UI (LOW_CONFIDENCE, AUTH_REQUIRED, COOLDOWN).
+- Global adaptive authorization with risk-aware execution confidence control.
+- Runtime fail-safe states surfaced in UI (LOW_CONFIDENCE, COOLDOWN, NO_FACE_DETECTED).
 - Latency-aware backpressure controls using bounded queueing and stale-frame dropping.
 - Live PyQt6 dashboard with activity timeline, runtime controls, and diagnostics.
 - Headless CLI mode for non-UI operation and automation scenarios.

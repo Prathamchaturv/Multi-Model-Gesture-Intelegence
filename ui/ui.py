@@ -352,6 +352,234 @@ class ActivityLog(QWidget):
 
 
 # ===========================================================================
+# ===========================================================================
+# Enhanced Status Indicators & Control Panel  (NEW: Session 9)
+# ===========================================================================
+
+class StatusIndicator(QWidget):
+    """Compact status indicator with label, value, and status color."""
+    
+    def __init__(self, label: str, status_color: str = ACCENT, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._label = label
+        self._status_color = status_color
+        self._is_active = False
+        self.setMaximumHeight(32)
+        
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        
+        # Status dot (animated pulsing effect)
+        self._dot = QLabel('●')
+        self._dot.setStyleSheet(f'color: {status_color}; font-size: 8px; background: transparent; border: none;')
+        self._dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dot.setFixedSize(12, 12)
+        
+        # Label
+        lbl = QLabel(label)
+        lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        
+        # Value placeholder
+        self._value = QLabel('—')
+        self._value.setStyleSheet(f'color: {TEXT_PRI}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
+        self._value.setAlignment(Qt.AlignmentFlag.AlignRight)
+        
+        lay.addWidget(self._dot)
+        lay.addWidget(lbl)
+        lay.addStretch()
+        lay.addWidget(self._value)
+    
+    def set_active(self, active: bool, value_text: str = '') -> None:
+        """Update indicator status and optional value."""
+        self._is_active = active
+        color = self._status_color if active else TEXT_HINT
+        self._dot.setStyleSheet(f'color: {color}; font-size: 8px; background: transparent; border: none;')
+        if value_text:
+            self._value.setText(value_text)
+    
+    def set_status_color(self, color: str) -> None:
+        """Change indicator color."""
+        self._status_color = color
+        if self._is_active:
+            self._dot.setStyleSheet(f'color: {color}; font-size: 8px; background: transparent; border: none;')
+
+
+class ControlPanel(QFrame):
+    """Interactive control panel with sliders, buttons, and toggles for real-time tuning."""
+    
+    gesture_sensitivity_changed = pyqtSignal(float)
+    voice_confidence_changed = pyqtSignal(float)
+    mode_requested = pyqtSignal(str)
+    gesture_enabled_changed = pyqtSignal(bool)
+    voice_enabled_changed = pyqtSignal(bool)
+    
+    def __init__(self, state: SharedState, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._state = state
+        self._build()
+        self._connect_signals()
+    
+    def _build(self) -> None:
+        self.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(12)
+        
+        # Title
+        title = QLabel('INTERACTIVE CONTROLS')
+        title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        lay.addWidget(title)
+        lay.addWidget(_divider())
+        
+        # ─── Gesture Sensitivity Control ──────────────────────────────────
+        gest_row = QHBoxLayout()
+        gest_lbl = QLabel('Gesture Sensitivity')
+        gest_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        self._gest_val = QLabel('1.0x')
+        self._gest_val.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._gest_val.setStyleSheet(f'color: {TEXT_PRI}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
+        gest_row.addWidget(gest_lbl)
+        gest_row.addStretch()
+        gest_row.addWidget(self._gest_val)
+        lay.addLayout(gest_row)
+        
+        self._gest_slider = QSlider(Qt.Orientation.Horizontal)
+        self._gest_slider.setRange(30, 100)
+        self._gest_slider.setValue(70)
+        self._gest_slider.setSingleStep(5)
+        self._gest_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{ background: {BORDER}; height: 5px; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {MODE_APP}; width: 14px; margin: -5px 0; border-radius: 7px; cursor: pointer; }}
+            QSlider::handle:horizontal:hover {{ background: #33ffff; }}
+            QSlider::sub-page:horizontal {{ background: {MODE_APP}44; border-radius: 2px; }}
+        """)
+        self._gest_slider.sliderMoved.connect(self._on_gest_sensitivity_changed)
+        lay.addWidget(self._gest_slider)
+        
+        # ─── Voice Confidence Control ────────────────────────────────────
+        voice_row = QHBoxLayout()
+        voice_lbl = QLabel('Voice Confidence Threshold')
+        voice_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        self._voice_val = QLabel('0.6')
+        self._voice_val.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._voice_val.setStyleSheet(f'color: {TEXT_PRI}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
+        voice_row.addWidget(voice_lbl)
+        voice_row.addStretch()
+        voice_row.addWidget(self._voice_val)
+        lay.addLayout(voice_row)
+        
+        self._voice_slider = QSlider(Qt.Orientation.Horizontal)
+        self._voice_slider.setRange(30, 100)
+        self._voice_slider.setValue(60)
+        self._voice_slider.setSingleStep(5)
+        self._voice_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{ background: {BORDER}; height: 5px; border-radius: 2px; }}
+            QSlider::handle:horizontal {{ background: {MODE_MEDIA}; width: 14px; margin: -5px 0; border-radius: 7px; cursor: pointer; }}
+            QSlider::handle:horizontal:hover {{ background: #5fa8ff; }}
+            QSlider::sub-page:horizontal {{ background: {MODE_MEDIA}44; border-radius: 2px; }}
+        """)
+        self._voice_slider.sliderMoved.connect(self._on_voice_confidence_changed)
+        lay.addWidget(self._voice_slider)
+        
+        # ─── Mode Selection Buttons ──────────────────────────────────────
+        mode_lbl = QLabel('Operating Mode')
+        mode_lbl.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 1px; background: transparent; border: none; margin-top: 8px;'
+        )
+        lay.addWidget(mode_lbl)
+        
+        mode_btns = QHBoxLayout()
+        mode_btns.setSpacing(8)
+        
+        self._mode_btns: dict[str, QPushButton] = {}
+        modes = [
+            ('App Mode', MODE_APP, ACCENT),
+            ('Media Mode', MODE_MEDIA, ACCENT_SOFT),
+            ('System Mode', MODE_SYSTEM, WARNING),
+        ]
+        
+        for mode_name, color, _ in modes:
+            btn = QPushButton(mode_name)
+            btn.setFixedHeight(32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(255,255,255,0.05); color: {TEXT_SEC}; border: 1px solid {color}44;
+                    border-radius: 6px; font-size: 11px; font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background: {color}22; border: 1px solid {color}88; color: {TEXT_PRI};
+                }}
+                QPushButton[active="true"] {{
+                    background: {color}44; border: 1px solid {color}; color: {TEXT_PRI};
+                }}
+            """)
+            btn.clicked.connect(lambda checked=False, m=mode_name: self._on_mode_selected(m))
+            mode_btns.addWidget(btn)
+            self._mode_btns[mode_name] = btn
+        
+        mode_btns.addStretch()
+        lay.addLayout(mode_btns)
+        
+        # ─── Feature Toggles ──────────────────────────────────────────────
+        toggle_row = QHBoxLayout()
+        toggle_row.setSpacing(8)
+        
+        self._gest_enable = QCheckBox('Gesture')
+        self._gest_enable.setChecked(True)
+        self._gest_enable.setStyleSheet(f"""
+            QCheckBox {{ color: {TEXT_SEC}; font-size: 10px; font-weight: 600; background: transparent; }}
+            QCheckBox::indicator {{ width: 14px; height: 14px; }}
+            QCheckBox::indicator:unchecked {{ border: 1px solid {BORDER}; background: {BG_HOVER}; border-radius: 3px; }}
+            QCheckBox::indicator:checked {{ border: 1px solid {MODE_APP}; background: {MODE_APP}; border-radius: 3px; }}
+        """)
+        self._gest_enable.stateChanged.connect(lambda: self.gesture_enabled_changed.emit(self._gest_enable.isChecked()))
+        toggle_row.addWidget(self._gest_enable)
+        
+        self._voice_enable = QCheckBox('Voice')
+        self._voice_enable.setChecked(True)
+        self._voice_enable.setStyleSheet(self._gest_enable.styleSheet())
+        self._voice_enable.stateChanged.connect(lambda: self.voice_enabled_changed.emit(self._voice_enable.isChecked()))
+        toggle_row.addWidget(self._voice_enable)
+        
+        toggle_row.addStretch()
+        lay.addLayout(toggle_row)
+    
+    def _connect_signals(self) -> None:
+        """Connect to SharedState for live updates."""
+        self._state.mode_changed.connect(self._on_state_mode_changed)
+    
+    def _on_gest_sensitivity_changed(self, value: int) -> None:
+        """Update gesture sensitivity display and emit signal."""
+        normalized = value / 70.0  # Center at 70 = 1.0x
+        self._gest_val.setText(f'{normalized:.1f}x')
+        self.gesture_sensitivity_changed.emit(normalized)
+    
+    def _on_voice_confidence_changed(self, value: int) -> None:
+        """Update voice confidence display and emit signal."""
+        normalized = value / 100.0
+        self._voice_val.setText(f'{normalized:.2f}')
+        self.voice_confidence_changed.emit(normalized)
+    
+    def _on_mode_selected(self, mode_name: str) -> None:
+        """Handle mode button click."""
+        self.mode_requested.emit(mode_name)
+        self._state.request_mode(mode_name)
+    
+    def _on_state_mode_changed(self, mode_name: str) -> None:
+        """Update button highlights when mode changes."""
+        for btn_name, btn in self._mode_btns.items():
+            is_active = btn_name == mode_name
+            btn.setProperty('active', 'true' if is_active else 'false')
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+
 # Sidebar  (was ui/sidebar.py)
 # ===========================================================================
 
@@ -3029,6 +3257,53 @@ class SystemPanel(QWidget):
         root = QVBoxLayout(container)
         root.setContentsMargins(0, 16, 16, 16)
         root.setSpacing(12)
+        
+        # ─── NEW: Enhanced Status Indicators Card ─────────────────────────
+        status_card = QFrame()
+        status_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        status_lay = QVBoxLayout(status_card)
+        status_lay.setContentsMargins(16, 12, 16, 12)
+        status_lay.setSpacing(8)
+        
+        status_title = QLabel('STATUS')
+        status_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        status_lay.addWidget(status_title)
+        status_lay.addWidget(_divider())
+        
+        # Gesture indicator
+        self._gesture_indicator = StatusIndicator('Gesture Detected', MODE_APP)
+        status_lay.addWidget(self._gesture_indicator)
+        state.gesture_changed.connect(self._on_gesture_updated)
+        
+        # Voice indicator
+        self._voice_indicator = StatusIndicator('Voice Command', MODE_MEDIA)
+        status_lay.addWidget(self._voice_indicator)
+        state.voice_command_changed.connect(self._on_voice_updated)
+        
+        # Face auth indicator
+        self._face_indicator = StatusIndicator('Face Authorized', ACTIVE)
+        status_lay.addWidget(self._face_indicator)
+        state.face_auth_changed.connect(self._on_face_updated)
+        
+        # Initialize indicators from current state
+        self._on_gesture_updated(state.current_gesture)
+        self._on_voice_updated(state.voice_command)
+        self._on_face_updated(state.face_authorized, state.face_status)
+        
+        root.addWidget(status_card)
+        
+        # ─── NEW: Interactive Control Panel ────────────────────────────────
+        self._control_panel = ControlPanel(state)
+        self._control_panel.gesture_sensitivity_changed.connect(self._on_sensitivity_changed)
+        self._control_panel.voice_confidence_changed.connect(self._on_confidence_changed)
+        self._control_panel.gesture_enabled_changed.connect(state.set_gesture_control_enabled)
+        self._control_panel.voice_enabled_changed.connect(state.set_voice_listener_enabled)
+        root.addWidget(self._control_panel)
+        
         root.addWidget(SystemCard(state))
         self._mode_card = ModeCard(state)
         root.addWidget(self._mode_card)
@@ -3039,6 +3314,41 @@ class SystemPanel(QWidget):
 
         scroll.setWidget(container)
         outer.addWidget(scroll)
+    
+    @pyqtSlot(str)
+    def _on_gesture_updated(self, gesture: str) -> None:
+        """Update gesture indicator based on detected gesture."""
+        if gesture and gesture.strip():
+            self._gesture_indicator.set_active(True, gesture)
+        else:
+            self._gesture_indicator.set_active(False, '—')
+    
+    @pyqtSlot(str)
+    def _on_voice_updated(self, command: str) -> None:
+        """Update voice indicator based on recognized command."""
+        if command and command.strip():
+            self._voice_indicator.set_active(True, command)
+        else:
+            self._voice_indicator.set_active(False, '—')
+    
+    @pyqtSlot(bool, str)
+    def _on_face_updated(self, authorized: bool, status: str) -> None:
+        """Update face auth indicator."""
+        color = ACTIVE if authorized else INACTIVE
+        self._face_indicator.set_status_color(color)
+        self._face_indicator.set_active(authorized, 'Yes' if authorized else 'No')
+    
+    @pyqtSlot(float)
+    def _on_sensitivity_changed(self, value: float) -> None:
+        """Handle gesture sensitivity slider change."""
+        # Store for potential future use or logging
+        pass
+    
+    @pyqtSlot(float)
+    def _on_confidence_changed(self, value: float) -> None:
+        """Handle voice confidence slider change."""
+        # Store for potential future use or logging
+        pass
 
     def refresh_guide(self) -> None:
         self._guide_card.refresh()

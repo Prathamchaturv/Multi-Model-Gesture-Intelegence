@@ -18,9 +18,9 @@ from enum import Enum
 import time
 
 from core.face_security import FaceAuthResult, FaceSecurityManager
-from engine.adaptive_authorization import AdaptiveAuthorizationEngine
-from engine.action_executor import ActionExecutor
-from engine.decision_engine import DecisionEngine
+from core.authorization_engine import AdaptiveAuthorizationEngine
+from execution.cursor_control import ActionExecutor
+from core.decision_engine import DecisionEngine
 from engine.runtime_controller import RuntimeController
 from utils.logger import (
     log_action_executed,

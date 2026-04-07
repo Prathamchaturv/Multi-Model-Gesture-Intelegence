@@ -4,6 +4,8 @@
   "phrase_time_limit_s": 2.0,
   "energy_threshold": 250,
   "recognition_language": "en-IN",
+  "confidence_threshold": 0.6,
+  "command_groups": {},
   "system_mode_only": true,
   "system_mode_voice_actions": {
     "open_brave": "open_brave",

@@ -19,11 +19,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.camera import Camera
 from core.face_security import FaceSecurityManager
-from core.gesture_classifier import GestureClassifier
+from core.gesture_engine import GestureClassifier
 from core.hand_tracking import HandTracker
-from engine.action_executor import ActionExecutor
+from execution.cursor_control import ActionExecutor
 from engine.activation_manager import ActivationManager
-from engine.decision_engine import DecisionEngine
+from core.decision_engine import DecisionEngine
 from engine.unified_pipeline import InputEventNormalizer, ModeManager, UnifiedDecisionPipeline
 from utils.config import Config
 

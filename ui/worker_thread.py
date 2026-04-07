@@ -41,7 +41,7 @@ from PyQt6.QtGui   import QImage
 
 from core.camera                 import Camera
 from core.hand_tracking          import HandTracker
-from core.gesture_classifier     import GestureClassifier
+from core.gesture_engine         import GestureClassifier
 from core.adaptive_gesture_learning import (
     AdaptiveGestureMatcher,
     CustomGestureStore,
@@ -49,11 +49,11 @@ from core.adaptive_gesture_learning import (
 )
 from core.calibration            import CalibrationManager
 from core.face_security          import FaceSecurityManager
-from core.voice_control          import VoiceCommandListener
+from core.voice_engine           import VoiceCommandListener
 from engine.activation_manager   import ActivationManager
-from engine.decision_engine      import DecisionEngine
-from engine.action_executor      import ActionExecutor
-from engine.adaptive_authorization import AdaptiveAuthorizationEngine
+from core.decision_engine        import DecisionEngine
+from execution.cursor_control    import ActionExecutor
+from core.authorization_engine   import AdaptiveAuthorizationEngine
 from engine.metrics_manager      import MetricsManager
 from engine.multimodal_fusion    import MultimodalFusionLayer
 from engine.runtime_controller    import RuntimeController, RuntimeState
@@ -64,6 +64,7 @@ from engine.unified_pipeline     import (
 )
 from utils.fps_counter           import FPSCounter
 from utils.config                import Config
+from utils.settings_loader       import RuntimeSettingsLoader
 from utils.logger                import (
     get_mmgi_logger,
     log_action_executed,
@@ -155,6 +156,58 @@ class GestureStabilityFilter:
 
         return candidate, 'stable'
 
+
+class LatencyOverloadGuard:
+    """Track frame latency and request load-shedding during sustained overload."""
+
+    def __init__(
+        self,
+        *,
+        target_ms: float = 100.0,
+        trigger_streak: int = 3,
+        recover_streak: int = 6,
+    ) -> None:
+        # Hard safety objective: keep interaction latency under 100ms whenever possible.
+        self._target_ms = max(1.0, float(target_ms))
+        self._trigger_streak = max(1, int(trigger_streak))
+        self._recover_streak = max(1, int(recover_streak))
+        self._over_streak = 0
+        self._under_streak = 0
+        self._active = False
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def observe(self, latency_ms: float) -> tuple[bool, bool]:
+        """Return (entered_overload, exited_overload) state transitions."""
+        entered = False
+        exited = False
+        if latency_ms > self._target_ms:
+            self._over_streak += 1
+            self._under_streak = 0
+        else:
+            self._under_streak += 1
+            self._over_streak = 0
+
+        if not self._active and self._over_streak >= self._trigger_streak:
+            self._active = True
+            entered = True
+        elif self._active and self._under_streak >= self._recover_streak:
+            self._active = False
+            exited = True
+
+        return entered, exited
+
+
+def _safety_allows_actions(*, hand_present: bool, confidence: float, min_confidence: float) -> bool:
+    """Centralized safety gate: suppress actions with no-hand or weak confidence."""
+    if not hand_present:
+        return False
+    if confidence < min_confidence:
+        return False
+    return True
+
 def _ts() -> str:
     return datetime.now().strftime('%H:%M:%S')
 
@@ -167,6 +220,8 @@ def _load_voice_control_settings(config: Config) -> dict:
         'phrase_time_limit_s': float(config.get('voice_control.phrase_time_limit_s', 2.0)),
         'energy_threshold': int(config.get('voice_control.energy_threshold', 250)),
         'recognition_language': str(config.get('voice_control.recognition_language', 'en-IN')),
+        'confidence_threshold': float(config.get('voice_control.confidence_threshold', 0.6)),
+        'command_groups': dict(config.get('voice_control.command_groups', {})),
         'system_mode_only': bool(config.get('voice_control.system_mode_only', True)),
         'system_mode_voice_actions': dict(config.get('voice_control.system_mode_voice_actions', {
             'open_brave': 'open_brave',
@@ -253,6 +308,9 @@ def _draw_overlay(
     mode: str,
     is_active: bool,
     fps: float,
+    latency_ms: float | None = None,
+    e2e_latency_ms: float | None = None,
+    confidence: float | None = None,
     face_status: str | None = None,
     face_authorized: bool | None = None,
     debug_text: str | None = None,
@@ -277,9 +335,23 @@ def _draw_overlay(
     cv2.putText(frame, mode.upper(), (w // 2 - 70, 36),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, mc, 2)
 
-    # FPS
-    cv2.putText(frame, f'FPS {fps:.0f}', (w - 90, 36),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, _WHITE, 1)
+    # Compact stats panel on the top-right (cheap draw ops, no heavy formatting).
+    panel_w, panel_h = 195, 74
+    panel_x = w - panel_w - 10
+    panel_y = 6
+    cv2.rectangle(frame, (panel_x, panel_y), (panel_x + panel_w, panel_y + panel_h), (32, 32, 42), -1)
+
+    latency_text = '--' if latency_ms is None else f'{latency_ms:.1f}ms'
+    e2e_text = '--' if e2e_latency_ms is None else f'{e2e_latency_ms:.1f}ms'
+    conf_text = '--' if confidence is None else f'{confidence:.2f}'
+    cv2.putText(frame, f'FPS: {fps:.1f}', (panel_x + 8, panel_y + 18),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, _WHITE, 1, cv2.LINE_AA)
+    cv2.putText(frame, f'Frame: {latency_text}', (panel_x + 8, panel_y + 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, _WHITE, 1, cv2.LINE_AA)
+    cv2.putText(frame, f'E2E: {e2e_text}', (panel_x + 8, panel_y + 52),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, _WHITE, 1, cv2.LINE_AA)
+    cv2.putText(frame, f'Conf: {conf_text}', (panel_x + 8, panel_y + 69),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, _WHITE, 1, cv2.LINE_AA)
 
     if face_status:
         face_colour = _GREEN if face_authorized else _RED
@@ -417,7 +489,19 @@ class WorkerThread(QThread):
         try:
             config = Config()
             get_mmgi_logger()  # ensure logger is initialized once on worker start
-            low_conf_threshold = float(config.get('hand_tracking.min_detection_confidence'))
+            settings_loader = RuntimeSettingsLoader(Path(__file__).parent.parent / 'config' / 'settings.json')
+            runtime_settings = settings_loader.get_settings()
+            low_conf_threshold = float(
+                runtime_settings.get(
+                    'gesture_threshold',
+                    config.get('hand_tracking.min_detection_confidence'),
+                )
+            )
+            voice_confidence = float(runtime_settings.get('voice_confidence', 1.0))
+            tuned_cooldown_s = float(
+                runtime_settings.get('cooldown', config.get('activation.cooldown_duration') or 1.0)
+            )
+            cursor_sensitivity_scale = float(runtime_settings.get('cursor_sensitivity', 1.0))
 
             voice_cfg = _load_voice_control_settings(config)
             voice_listener = VoiceCommandListener(
@@ -426,6 +510,9 @@ class WorkerThread(QThread):
                 phrase_time_limit_s=float(voice_cfg.get('phrase_time_limit_s', 2.0)),
                 energy_threshold=int(voice_cfg.get('energy_threshold', 250)),
                 recognition_language=str(voice_cfg.get('recognition_language', 'en-IN')),
+                confidence_threshold=float(voice_cfg.get('confidence_threshold', 0.6)),
+                command_groups=dict(voice_cfg.get('command_groups', {})),
+                command_config_path=Path(__file__).parent.parent / 'config' / 'voice_control.json',
             )
             voice_enabled_for_fusion = voice_listener.is_enabled
             voice_system_mode_only = bool(voice_cfg.get('system_mode_only', True))
@@ -490,7 +577,7 @@ class WorkerThread(QThread):
             # Fast-path action gating: gesture_filter already confirms stability,
             # so keep activation confirmation minimal and cooldown short.
             activation_confirm_frames = max(1, int(config.get('pipeline.action_confirm_frames', 1) or 1))
-            action_cooldown_s = max(0.2, min(0.25, float(config.get('activation.cooldown_duration') or 1.0)))
+            action_cooldown_s = max(0.0, float(tuned_cooldown_s))
 
             activation_manager = ActivationManager(
                 open_palm_duration   = profile.gesture_hold_seconds,
@@ -610,6 +697,13 @@ class WorkerThread(QThread):
             frame_budget_recover_streak = 12
             frame_budget_log_interval_s = 8.0
             last_frame_budget_log_ts = 0.0
+            last_action_e2e_latency_ms: float | None = None
+            max_response_latency_ms = min(100.0, float(config.get('pipeline.max_response_latency_ms', 100.0) or 100.0))
+            overload_guard = LatencyOverloadGuard(
+                target_ms=max_response_latency_ms,
+                trigger_streak=3,
+                recover_streak=6,
+            )
 
             # Unified bidirectional scroll controller (One Finger = scroll_down, Thumb+Index = scroll_up)
             # State variables for continuous scrolling with gesture stability
@@ -731,6 +825,31 @@ class WorkerThread(QThread):
                     gesture_filter.set_confirm_frames(max(3, min(int(profile.stability_frames), 3)))
                     state.emit_log(_ts(), 'SYSTEM', 'Calibration reloaded from settings')
 
+                # Runtime tuning from config/settings.json (no restart required).
+                if settings_loader.reload_if_changed():
+                    runtime_settings = settings_loader.get_settings()
+                    low_conf_threshold = float(runtime_settings.get('gesture_threshold', low_conf_threshold))
+                    voice_confidence = float(runtime_settings.get('voice_confidence', voice_confidence))
+                    action_cooldown_s = max(0.0, float(runtime_settings.get('cooldown', action_cooldown_s)))
+                    cursor_sensitivity_scale = float(runtime_settings.get('cursor_sensitivity', cursor_sensitivity_scale))
+
+                    activation_manager.configure(cooldown_duration=action_cooldown_s)
+                    runtime_controller.configure(
+                        min_confidence=low_conf_threshold,
+                        cooldown_seconds=action_cooldown_s,
+                    )
+                    state.emit_log(
+                        _ts(),
+                        'SYSTEM',
+                        (
+                            'Settings reloaded: '
+                            f'threshold={low_conf_threshold:.2f}, '
+                            f'voice_conf={voice_confidence:.2f}, '
+                            f'cooldown={action_cooldown_s:.2f}, '
+                            f'cursor_sens={cursor_sensitivity_scale:.2f}'
+                        ),
+                    )
+
                 if state.requested_mode != mode_manager.current_mode:
                     mode_manager.set_mode(state.requested_mode)
                     decision_engine.current_mode = mode_manager.current_mode
@@ -760,6 +879,9 @@ class WorkerThread(QThread):
                                 phrase_time_limit_s=float(voice_cfg.get('phrase_time_limit_s', 2.0)),
                                 energy_threshold=int(voice_cfg.get('energy_threshold', 250)),
                                 recognition_language=str(voice_cfg.get('recognition_language', 'en-IN')),
+                                confidence_threshold=float(voice_cfg.get('confidence_threshold', 0.6)),
+                                command_groups=dict(voice_cfg.get('command_groups', {})),
+                                command_config_path=Path(__file__).parent.parent / 'config' / 'voice_control.json',
                             )
                             voice_listener.start()
                             if voice_listener.is_enabled:
@@ -936,7 +1058,7 @@ class WorkerThread(QThread):
                     state.set_landmarks(hand_data.get('landmarks'))
                     hand_distance = calibration.estimate_hand_distance(hand_data.get('landmarks'))
                     dynamic_sensitivity = calibration.cursor_sensitivity_for_distance(hand_distance)
-                    state.set_cursor_sensitivity(dynamic_sensitivity)
+                    state.set_cursor_sensitivity(dynamic_sensitivity * cursor_sensitivity_scale)
                     confidence = float(hand_data.get('confidence', 0.0))
 
                     if confidence < low_conf_threshold:
@@ -1012,7 +1134,7 @@ class WorkerThread(QThread):
                         # No-hand frames are expected and should not continuously trigger safety lock.
                         gesture, _ = gesture_filter.update(None, hand_present=False)
                         state.set_landmarks(None)
-                        state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
+                        state.set_cursor_sensitivity(profile.base_cursor_sensitivity * cursor_sensitivity_scale)
                         if custom_confirmation is not None:
                             custom_confirmation.reset()
                         ui_gesture_text = 'No hand detected'
@@ -1027,7 +1149,7 @@ class WorkerThread(QThread):
                         ui_gesture_text = 'Gesture Control Off'
                         gesture_verification_status = 'Disabled'
                         state.set_landmarks(None)
-                        state.set_cursor_sensitivity(profile.base_cursor_sensitivity)
+                        state.set_cursor_sensitivity(profile.base_cursor_sensitivity * cursor_sensitivity_scale)
 
                 frame_over_budget = time.perf_counter() > frame_deadline
                 if frame_over_budget:
@@ -1064,17 +1186,30 @@ class WorkerThread(QThread):
                     latest_gesture_name = None
                     latest_gesture_confidence = 0.0
 
+                hand_present = hand_data is not None
+                safety_input_ok = _safety_allows_actions(
+                    hand_present=hand_present,
+                    confidence=confidence,
+                    min_confidence=low_conf_threshold,
+                )
+
                 use_cached_gesture = False
                 effective_gesture = gesture
                 effective_confidence = confidence
                 if (
                     effective_gesture is None
+                    and safety_input_ok
                     and latest_gesture_name is not None
                     and (time.time() - latest_gesture_ts) <= latest_gesture_ttl_s
                 ):
                     use_cached_gesture = True
                     effective_gesture = latest_gesture_name
                     effective_confidence = latest_gesture_confidence
+
+                if not safety_input_ok:
+                    # Strong failure-handling guarantee: no hand/low confidence means no action.
+                    effective_gesture = None
+                    use_cached_gesture = False
 
                 # ----------------------------------------------------------
                 # Activation manager + unified event pipeline
@@ -1113,6 +1248,12 @@ class WorkerThread(QThread):
                         and decision_engine.is_mode_switch(effective_gesture)
                     )
 
+                    if not safety_input_ok:
+                        pending_events.clear()
+                        if scroll_active:
+                            scroll_active = False
+                            scroll_gesture_frame_count = 0
+                            scroll_direction = None
                     # =========================================================
                     # Gesture conflict resolution: Scroll vs Clicks
                     # Priority: Scroll > Clicks (in System Mode)
@@ -1180,7 +1321,7 @@ class WorkerThread(QThread):
                             gesture='Custom Action',
                             confidence=confidence,
                         )
-                        pending_events.append((custom_event, custom_action, 'Custom Gesture'))
+                        pending_events.append((custom_event, custom_action, 'Custom Gesture', time.perf_counter()))
                     elif effective_gesture:
                         if is_mode_switch_gesture or should_execute:
                             gesture_event = InputEventNormalizer.from_gesture(
@@ -1193,7 +1334,7 @@ class WorkerThread(QThread):
                             voice_command = voice_event.command
                             voice_input_event = InputEventNormalizer.from_voice(
                                 command=voice_command,
-                                confidence=1.0,
+                                confidence=voice_confidence,
                                 timestamp=voice_event.timestamp,
                             )
 
@@ -1205,11 +1346,17 @@ class WorkerThread(QThread):
                     )
                     for fused_event in fused_events:
                         label = 'Voice' if fused_event.type == 'voice' else mode_manager.current_mode
-                        pending_events.append((fused_event, None, label))
+                        pending_events.append((fused_event, None, label, time.perf_counter()))
 
                 if runtime_locked_reason is None:
                     if not gesture_processing_enabled:
                         runtime_locked_reason = 'Gesture control disabled'
+                    elif overload_guard.active:
+                        runtime_locked_reason = 'Overload protection'
+                    elif not hand_present:
+                        runtime_locked_reason = 'No hand detected'
+                    elif confidence < low_conf_threshold:
+                        runtime_locked_reason = 'Low confidence input'
                     elif gesture_verification_status != 'Stable':
                         runtime_locked_reason = 'Waiting for stable gesture'
 
@@ -1220,7 +1367,7 @@ class WorkerThread(QThread):
                     runtime_controller.set_state(RuntimeState.RUNNING, 'Runtime healthy')
                     state.set_runtime_state(RuntimeState.RUNNING.value, 'Runtime healthy')
 
-                for event, forced_action, source_label in pending_events:
+                for event, forced_action, source_label, event_start_perf in pending_events:
                     if forced_action is not None:
                         allowed, blocked_reason = runtime_controller.can_execute_action(
                             action=forced_action,
@@ -1246,6 +1393,7 @@ class WorkerThread(QThread):
                                 continue
 
                         action_executor.execute(forced_action)
+                        last_action_e2e_latency_ms = (time.perf_counter() - event_start_perf) * 1000.0
                         runtime_controller.mark_action_executed()
                         metrics.record_activation_attempt(succeeded=True)
                         label = action_executor._LABELS.get(forced_action, forced_action)
@@ -1285,6 +1433,7 @@ class WorkerThread(QThread):
                             state.emit_log(_ts(), 'SYSTEM', f'Adaptive control: {result.auth_feedback or result.blocked_reason}')
 
                     if result.action:
+                        last_action_e2e_latency_ms = (time.perf_counter() - event_start_perf) * 1000.0
                         metrics.record_activation_attempt(succeeded=True)
                         label = action_executor._LABELS.get(result.action, result.action)
                         state.emit_log(_ts(), 'ACTION', f'{label}  [{source_label}]')
@@ -1330,6 +1479,27 @@ class WorkerThread(QThread):
                 # ----------------------------------------------------------
                 fps_counter.update()
                 latency_ms = (time.perf_counter() - t_start) * 1000
+
+                entered_overload, exited_overload = overload_guard.observe(latency_ms)
+                if entered_overload:
+                    # Load shedding policy: discard queued stale work and pause action execution briefly.
+                    dropped = max(0, len(frame_queue) - 1)
+                    if dropped > 0:
+                        _, newest = frame_queue[-1]
+                        frame_queue.clear()
+                        frame_queue.append((time.perf_counter(), newest))
+                        log_frame_drop('latency_overload', count=dropped, queue_size=frame_queue_size)
+                    state.emit_log(
+                        _ts(),
+                        'SYSTEM',
+                        f'Latency overload (> {max_response_latency_ms:.0f}ms): load shedding active',
+                    )
+                    log_runtime_warning(
+                        f'Latency overload entered: latency_ms={latency_ms:.1f} target_ms={max_response_latency_ms:.1f}'
+                    )
+                elif exited_overload:
+                    state.emit_log(_ts(), 'SYSTEM', 'Latency recovered: realtime path restored')
+                    log_pipeline_state('Latency recovered: overload guard released')
 
                 if adaptive_perf_enabled:
                     if adaptive_latency_ema is None:
@@ -1402,6 +1572,9 @@ class WorkerThread(QThread):
                     mode_manager.current_mode,
                     activation_manager.is_active,
                     fps_counter.fps,
+                    latency_ms=latency_ms,
+                    e2e_latency_ms=last_action_e2e_latency_ms,
+                    confidence=confidence,
                     face_status=face_status if mode_manager.current_mode == 'System Mode' else None,
                     face_authorized=face_authorized if mode_manager.current_mode == 'System Mode' else None,
                     debug_text=debug_text,

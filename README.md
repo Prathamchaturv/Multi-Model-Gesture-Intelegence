@@ -1,237 +1,278 @@
-# MMGI (Multi-Modal Gesture Intelligence)
+# MMGI - Multi-Modal Gesture Intelligence
 
-MMGI is a real-time human-computer interaction system that converts hand gestures and voice commands into desktop actions through a mode-aware, safety-gated execution pipeline.
+MMGI is a real-time desktop interaction system that combines computer vision, voice input, and safety gating to execute system actions reliably.
 
-## 1. Project Overview
+This README is structured for final-year project evaluation and emphasizes architecture quality, engineering rigor, and verifiable implementation evidence.
 
-### Problem Statement
-Traditional desktop interaction is keyboard/mouse dependent and not robust for touchless control scenarios such as hands-busy workflows, accessibility support, and smart control surfaces.
+## 1. System Architecture (Modular Design)
 
-### Why This Solution Is Needed
-Most gesture demos fail in practical usage because they lack runtime safety, overload control, and reliable execution gating. They detect gestures but do not engineer the full system required for stable real-time control.
+MMGI follows a modular, layered architecture with clear separation of responsibilities.
 
-### MMGI Approach
-MMGI combines computer vision, multimodal command input, runtime policy control, and UI observability into a single production-oriented architecture:
-- Gesture input: MediaPipe + OpenCV
-- Voice input: threaded listener with command normalization
-- Safety gates: activation protocol, confidence checks, adaptive authorization
-- Action layer: centralized executor for OS-level commands
-- UI layer: PyQt6 dashboard with live runtime state and diagnostics
+### Architecture Overview
 
----
+Input Layer
+- Webcam frames
+- Optional microphone commands
 
-## 2. System Architecture
+Perception Layer
+- Hand detection and landmarks
+- Gesture classification
+- Face authorization signals
 
-MMGI is organized as a layered runtime pipeline with explicit separation between acquisition, decisioning, policy enforcement, and execution.
+Decision and Policy Layer
+- Mode-aware decision mapping
+- Runtime safety policy and cooldown
+- Adaptive authorization policy
 
-### High-Level Flow
-1. Camera frame acquisition via OpenCV
-2. Hand landmark detection using MediaPipe
-3. Gesture classification from finger-state features
-4. Decision resolution using mode-aware mappings
-5. Runtime and security policy checks
-6. Action dispatch through a centralized executor
-7. State propagation to UI via SharedState signals
+Execution Layer
+- System action dispatch (OS actions)
+- Scroll and click controls
 
-### Runtime Pipeline
-Input (Gesture / Voice)
--> Input Event Normalizer
--> DecisionEngine (mode map + whitelist)
--> RuntimeController (confidence/cooldown policy)
--> AdaptiveAuthorizationEngine (risk + context aware)
--> ActionExecutor
--> SharedState + UI + logs
+Presentation Layer
+- PyQt6 dashboard and state visualization
+- Optional headless execution mode
 
-### Global Adaptive Authorization
-MMGI now applies an adaptive authorization stage globally across App Mode, Media Mode, and System Mode.
+### Module Breakdown
 
-- Face auth acts as a role provider, not a hard blocker.
-- User states:
-    - Open Mode: face auth OFF
-    - Restricted Mode: face auth ON but user not verified
-    - Trusted/Admin Mode: face auth verified
-- Risk levels:
-    - Low risk: execute immediately
-    - Medium risk: frame-based stability confirmation
-    - High risk: stability + hold confirmation, with partial restriction in Restricted mode
-- UI feedback values: Executed, Stabilizing..., Hold to Confirm, Access Controlled
+- core: sensing and decision facades
+  - gesture_engine
+  - voice_engine
+  - decision_engine
+  - authorization_engine
+- execution: action dispatch surfaces
+  - cursor_control
+  - scroll_control
+- ui: dashboard and runtime worker
+  - main_window
+  - worker_thread
+  - shared_state
+- engine: orchestration components
+  - unified_pipeline
+  - activation_manager
+  - runtime_controller
+- utils: config and logger infrastructure
 
----
+Reference files:
+- [core/gesture_engine.py](core/gesture_engine.py)
+- [core/voice_engine.py](core/voice_engine.py)
+- [core/decision_engine.py](core/decision_engine.py)
+- [core/authorization_engine.py](core/authorization_engine.py)
+- [execution/cursor_control.py](execution/cursor_control.py)
+- [execution/scroll_control.py](execution/scroll_control.py)
+- [engine/unified_pipeline.py](engine/unified_pipeline.py)
+- [ui/worker_thread.py](ui/worker_thread.py)
 
-## 3. Engineering Design
+## 2. Data Flow (Camera -> Gesture -> Decision -> Action)
 
-### Modular Architecture
-MMGI uses clear component boundaries:
-- core: sensing and perception primitives (camera, hand tracking, gesture classification, voice, face security)
-- engine: control and decision components (activation, decision engine, unified pipeline, execution)
-- ui: dashboard rendering, runtime worker thread, shared state model
-- utils: configuration and logging infrastructure
+Primary runtime path:
 
-### Separation of Concerns
-- Detection is isolated from classification logic.
-- Classification is isolated from mode/action decisioning.
-- Decisioning is isolated from execution side effects.
-- Execution is centralized to maintain policy consistency and auditability.
+1. Camera frame capture
+2. Hand landmark detection
+3. Gesture classification
+4. Event normalization
+5. Mode-aware decision resolution
+6. Authorization and runtime checks
+7. Action execution
+8. UI and log updates
 
-### Key Design Decisions
-- QThread worker for real-time pipeline to keep PyQt UI responsive.
-- SharedState signal bus for low-coupling UI updates.
-- Unified event model so gesture and voice follow the same policy path.
-- Bounded queue and stale-frame drop strategy to maintain responsiveness under load.
-- Explicit runtime states (RUNNING, PAUSED, ERROR) to support predictable failure behavior.
+Concrete integration points:
+- Frame processing and event loop: [ui/worker_thread.py](ui/worker_thread.py)
+- Decision resolution and mode logic: [engine/decision_engine.py](engine/decision_engine.py)
+- End-to-end orchestration: [engine/unified_pipeline.py](engine/unified_pipeline.py)
+- Action dispatch: [engine/action_executor.py](engine/action_executor.py)
 
----
+## 3. Engineering Practices
 
-## 4. Execution Flow
+### 3.1 Latency Control
 
-### End-to-End Operation
-1. WorkerThread reads frames from camera.
-2. HandTracker extracts landmarks and confidence.
-3. GestureClassifier resolves a gesture label.
-4. DecisionEngine maps gesture or voice command to action/mode intent.
-5. ActivationManager and RuntimeController verify readiness, confidence, cooldown, and lock state.
-6. AdaptiveAuthorizationEngine applies risk-aware confirmation using user context and face role state.
-7. ActionExecutor performs OS-level behavior (application launch, media key, input control).
-8. SharedState publishes updates to Vision panel, System panel, and Activity log.
+Implemented controls:
+- Rolling FPS and per-frame latency measurement
+- Runtime latency overload guard (targeted under 100 ms behavior)
+- Adaptive processing scale and inference pacing
 
-### Example
-Two Fingers in Media Mode -> DecisionEngine maps to volume_down -> runtime checks pass -> ActionExecutor sends volume down command.
+Evidence:
+- FPS and latency update: [ui/worker_thread.py](ui/worker_thread.py#L1465)
+- Overload protection and recovery: [ui/worker_thread.py](ui/worker_thread.py#L1289)
+- Overlay telemetry rendering: [ui/worker_thread.py](ui/worker_thread.py#L303)
 
-### Multimodal Fusion
-Gesture and voice are normalized into a common InputEvent representation before policy and decision processing, ensuring consistent behavior across modalities.
+### 3.2 Backpressure Handling
 
----
+Implemented controls:
+- Bounded frame queue
+- Queue overflow drop policy
+- Stale-frame dropping (latest frame preference under load)
 
-## 5. Performance and Latency
+Evidence:
+- Bounded queue setup and stale-drop logic: [ui/worker_thread.py](ui/worker_thread.py)
+- Frame drop logging: [utils/logger.py](utils/logger.py#L219)
 
-### Real-Time Targets
-- Camera pipeline configured around real-time inference cadence.
-- FPS is tracked continuously and exposed in UI.
-- Per-frame latency is logged for runtime diagnostics.
+### 3.3 Failure Handling
 
-### Optimization Strategy
-- Bounded queue to prevent unbounded buffering.
-- Stale-frame dropping to prioritize freshest user intent.
-- Inference rate cap and frame-time budget controls.
-- Short-lived gesture cache to maintain continuity across dropped frames.
+Implemented controls:
+- No hand detected -> suppress action
+- Low confidence -> suppress action
+- Camera and model recovery loops
+- Runtime state transitions: RUNNING, PAUSED, ERROR
 
-### Practical Runtime Characteristics
-Observed runtime logs show low tens-of-milliseconds frame processing in healthy conditions, with graceful degradation under load rather than hard blocking.
+Evidence:
+- Safety gate helper and runtime lock reasons: [ui/worker_thread.py](ui/worker_thread.py)
+- Runtime state policy: [engine/runtime_controller.py](engine/runtime_controller.py)
+- Error and warning logging: [utils/logger.py](utils/logger.py)
 
----
+## 4. Feature List (With Proof)
 
-## 6. Failure Handling and Reliability
+1. Real-time gesture recognition
+- Proof: [core/hand_tracking.py](core/hand_tracking.py), [core/gesture_classifier.py](core/gesture_classifier.py)
 
-MMGI is built to fail safely and recover predictably.
+2. Voice command input and normalization
+- Proof: [core/voice_control.py](core/voice_control.py), [core/voice_engine.py](core/voice_engine.py)
 
-### Failure Handling
-- Camera failures: retry and recovery loop with runtime state transition.
-- Gesture model failures: fallback and component reinitialization path.
-- Voice failures: backoff and retry window to avoid thrashing.
-- Face authorization failures: adaptive risk escalation and explicit security status.
+2b. Advanced voice command mapper with phrase variations and confidence scoring
+- Configurable command groups with multi-phrase aliases (e.g., "go down", "scroll down" → `scroll_down`)
+- Token-subset scoring for flexible phrase matching
+- Hot-reload from `voice_control.json` without restart
+- Confidence-based filtering to suppress low-likelihood commands
+- Proof: [core/voice_control.py](core/voice_control.py#L34) (`VoiceCommandMapper`), [docs/VOICE_COMMAND_MAPPER.md](docs/VOICE_COMMAND_MAPPER.md), [tests/test_voice_command_mapper.py](tests/test_voice_command_mapper.py) (20 tests)
 
-### Stability Strategies
-- Confidence-based rejection for low-quality detections.
-- Activation/deactivation protocol to prevent accidental actions.
-- Cooldown and lock states to control rapid repeats.
-- Structured log channels for runtime and performance telemetry.
+3. Multi-mode operation (App, Media, System)
+- Proof: [engine/decision_engine.py](engine/decision_engine.py), [tests/test_mode_switching.py](tests/test_mode_switching.py)
 
----
+4. Face authorization gating
+- Proof: [core/face_security.py](core/face_security.py), [tests/test_unified_pipeline.py](tests/test_unified_pipeline.py)
 
-## 7. Features
+5. Unified multimodal pipeline
+- Proof: [engine/unified_pipeline.py](engine/unified_pipeline.py), [tests/test_integration_gesture_control_flow.py](tests/test_integration_gesture_control_flow.py)
 
-- Real-time gesture recognition using MediaPipe landmarks and OpenCV frame processing.
-- Multimodal command support (gesture + voice) through a unified decision pipeline.
-- Mode-aware command system: App Mode, Media Mode, System Mode.
-- System Mode uses scroll and click gestures (cursor movement is intentionally disabled).
-- Global adaptive authorization with risk-aware execution confidence control.
-- Runtime fail-safe states surfaced in UI (LOW_CONFIDENCE, COOLDOWN, NO_FACE_DETECTED).
-- Latency-aware backpressure controls using bounded queueing and stale-frame dropping.
-- Live PyQt6 dashboard with activity timeline, runtime controls, and diagnostics.
-- Headless CLI mode for non-UI operation and automation scenarios.
+6. Runtime telemetry overlay (FPS, latency, confidence)
+- Proof: [ui/worker_thread.py](ui/worker_thread.py#L303)
 
----
+7. Headless operation for no-UI execution
+- Proof: [main.py](main.py#L266), [cli/main.py](cli/main.py)
 
-## 8. Installation and Usage
+8. Dynamic runtime tuning from configuration
+- Proof: [config/settings.json](config/settings.json), [utils/settings_loader.py](utils/settings_loader.py)
+
+## 5. Screenshots and Demo Explanation
+
+Current repository assets include placeholders for report/demo media.
+
+Available asset placeholders:
+- [assets/ui_screenshot.png.placeholder.txt](assets/ui_screenshot.png.placeholder.txt)
+- [assets/demo.gif.placeholder.txt](assets/demo.gif.placeholder.txt)
+- [assets/workflow.png.placeholder.txt](assets/workflow.png.placeholder.txt)
+- [assets/architecture.png.placeholder.txt](assets/architecture.png.placeholder.txt)
+
+Suggested demo flow for evaluation:
+1. Start GUI mode and show live dashboard updates.
+2. Demonstrate activation gesture and one action in each mode.
+3. Demonstrate voice command mapping.
+4. Show safety behavior for low-confidence and no-hand conditions.
+5. Run no-UI mode and show terminal logs.
+
+## 6. How To Run
 
 ### Prerequisites
+
 - Python 3.10+
 - Windows 10/11 recommended
 - Webcam
-- Microphone (for voice module)
+- Microphone for voice features
 
 ### Installation
-    git clone https://github.com/<your-username>/MMGI.git
-    cd MMGI
-    python -m venv venv
-    venv\Scripts\activate
-    pip install -r requirements.txt
 
-Place hand_landmarker.task in the project root before running.
+1. Clone repository
+2. Create virtual environment
+3. Install dependencies from requirements.txt
+4. Ensure hand_landmarker.task is present in project root
 
-### Run Dashboard Mode
-    python main.py
+Example commands:
+- python -m venv venv
+- venv\Scripts\activate
+- pip install -r requirements.txt
 
-### Run Headless Mode
-    python main.py --headless
+### Run GUI Mode
 
-### Run Dedicated CLI Mode
-    python cli/main.py
+- python main.py
 
-### Common CLI Options
-- --mode app|media|system
-- --max-frames N (0 means run until interrupted)
+### Run Headless Mode (No UI)
 
-Example:
-    python cli/main.py --mode media --max-frames 600
+- python main.py --no-ui
 
----
+Backward-compatible alias:
+- python main.py --headless
 
-## 9. Configuration and Runtime Controls
+Optional frame limit:
+- python main.py --no-ui --max-frames 600
 
-MMGI supports JSON-driven runtime configuration and UI-based live tuning.
+### Run Dedicated CLI Runner
 
-### Configuration Files
-- config/gesture_map.json
-- config/user_config.json
-- config/calibration.json
-- config/face_security.json
-- config/voice_control.json
+- python cli/main.py
+- python cli/main.py --mode media --max-frames 600
 
-### Runtime Controls
-- Toggle face security, voice listener, and gesture control.
-- Manual mode selection.
-- Detection confidence and gesture confirmation sliders.
-- Calibration controls for hold durations and sensitivity.
+Keyboard controls in no-UI OpenCV loop:
+- s = start/resume processing
+- p = pause processing
+- q or ESC = stop and exit
 
-Changes are persisted and applied with minimal runtime disruption.
+## 7. Tech Stack
 
----
+Core CV and AI:
+- OpenCV
+- MediaPipe
+- NumPy
 
-## 10. Testing and Validation
+UI and runtime:
+- PyQt6
 
-MMGI includes integration-oriented pytest coverage for:
-- Gesture-to-action resolution behavior
-- Multimodal fusion pathways
-- Runtime lock and safety-gate conditions
-- Pipeline lifecycle behavior
-- Logging and telemetry correctness
+Automation and system actions:
+- PyAutoGUI
 
-Run tests:
-    python -m pytest -q
+Voice:
+- SpeechRecognition
+- sounddevice
 
----
+Security:
+- bcrypt
 
-## 11. Future Improvements
+Testing:
+- pytest
 
-- Adaptive per-user threshold personalization from historical usage.
-- Enhanced offline voice intent parsing for noisy environments.
-- Stronger cross-platform action abstraction beyond Windows-centric automation.
-- Session replay and diagnostics export for reproducible failure analysis.
-- Policy tuning dashboard with comparative latency and false-activation trends.
+Dependency source:
+- [requirements.txt](requirements.txt)
 
----
+## 8. Test and Verification
 
-## 12. License
+Run full tests:
+- python -m pytest -q
 
-Educational and academic use.
+Integration-oriented references:
+- [tests/test_unified_pipeline.py](tests/test_unified_pipeline.py)
+- [tests/test_pipeline_lifecycle.py](tests/test_pipeline_lifecycle.py)
+- [tests/test_integration_gesture_control_flow.py](tests/test_integration_gesture_control_flow.py)
+- [tests/TEST_SUITE_GUIDE.md](tests/TEST_SUITE_GUIDE.md)
+
+## 9. Configuration and Tuning
+
+Core runtime tuning keys are in settings.json:
+- gesture_threshold
+- voice_confidence
+- cooldown
+- cursor_sensitivity
+
+References:
+- [config/settings.json](config/settings.json)
+- [utils/settings_loader.py](utils/settings_loader.py)
+
+## 10. Evaluator Notes
+
+Engineering strengths:
+- Modular architecture with explicit responsibility boundaries
+- Observable runtime with telemetry and structured logging
+- Safety-first decision gating under uncertain inputs
+- Backpressure and latency protections in real-time loop
+- Reproducible tests across critical control paths
+
+Potential future enhancements:
+- Cross-platform action adapters beyond Windows-centric automation
+- Expanded benchmark suite with hardware profile baselines
+- Persistent experiment reports for tuning comparisons

@@ -339,7 +339,7 @@ class SystemModeEngine:
         config_path:         str | None = None,
     ) -> None:
         from engine.activation_manager import ActivationManager
-        from engine.decision_engine    import DecisionEngine
+        from core.decision_engine      import DecisionEngine
 
         self._activation = ActivationManager(
             open_palm_duration  = open_palm_duration,

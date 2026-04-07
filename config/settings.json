@@ -1,0 +1,26 @@
+{
+  "gesture_threshold": 0.7,
+  "voice_confidence": 0.85,
+  "cooldown": 0.25,
+  "cursor_sensitivity": 1.0,
+  "architecture": {
+    "core": {
+      "gesture_engine": "core.gesture_engine",
+      "voice_engine": "core.voice_engine",
+      "decision_engine": "core.decision_engine",
+      "authorization_engine": "core.authorization_engine"
+    },
+    "execution": {
+      "cursor_control": "execution.cursor_control",
+      "scroll_control": "execution.scroll_control"
+    },
+    "ui": {
+      "main_window": "ui.main_window",
+      "components": "ui.components"
+    },
+    "utils": {
+      "logger": "utils.logger",
+      "helpers": "utils.config"
+    }
+  }
+}

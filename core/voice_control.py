@@ -4,11 +4,13 @@ Voice command listener for MMGI multimodal control.
 
 from __future__ import annotations
 
+import json
 import queue
 import re
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 try:
     import speech_recognition as sr  # type: ignore[import-not-found]
@@ -34,6 +36,217 @@ class VoiceCommandEvent:
     command: str
     transcript: str
     timestamp: float
+    confidence: float = 1.0
+
+
+DEFAULT_COMMAND_GROUPS: dict[str, list[str]] = {
+    'open_brave': [
+        'open brave',
+        'open brave browser',
+        'launch brave',
+        'start brave',
+        'open browser',
+    ],
+    'open_apple_music': [
+        'open apple music',
+        'open music',
+        'launch apple music',
+        'start music',
+    ],
+    'open_youtube': [
+        'open youtube',
+        'launch youtube',
+        'start youtube',
+    ],
+    'close_window': [
+        'close window',
+        'close this window',
+        'close app',
+        'exit app',
+        'shut window',
+    ],
+    'switch_tab': [
+        'switch tab',
+        'next tab',
+        'change tab',
+        'move tab',
+    ],
+    'scroll_down': [
+        'scroll down',
+        'go down',
+        'move down',
+        'page down',
+    ],
+    'play_song': [
+        'play song',
+        'play music',
+        'play',
+        'resume',
+    ],
+    'pause': [
+        'pause song',
+        'pause music',
+        'pause',
+        'stop music',
+    ],
+    'next_track': [
+        'next track',
+        'next song',
+        'skip',
+        'skip track',
+    ],
+    'previous_track': [
+        'previous track',
+        'previous song',
+        'back track',
+        'go back track',
+    ],
+    'volume_up': [
+        'volume up',
+        'increase volume',
+        'raise volume',
+        'louder',
+    ],
+    'volume_down': [
+        'volume down',
+        'decrease volume',
+        'lower volume',
+        'softer',
+    ],
+    'mute': [
+        'mute',
+        'silence',
+        'mute audio',
+    ],
+}
+
+
+def _normalize_text(raw: str) -> str:
+    text = re.sub(r'[^a-z0-9\s]', ' ', raw.lower()).strip()
+    return re.sub(r'\s+', ' ', text)
+
+
+class VoiceCommandMapper:
+    """Fast, configurable voice-command mapper with grouped phrase aliases."""
+
+    def __init__(
+        self,
+        command_groups: dict[str, list[str]] | None = None,
+        config_path: str | Path | None = None,
+        reload_interval_s: float = 0.5,
+    ) -> None:
+        self._config_path = Path(config_path) if config_path is not None else None
+        self._reload_interval_s = max(0.1, float(reload_interval_s))
+        self._last_reload_check_ts = 0.0
+        self._last_mtime: float | None = None
+
+        self._groups = dict(DEFAULT_COMMAND_GROUPS)
+        if command_groups:
+            self._merge_groups(command_groups)
+
+        self._exact_alias_to_command: dict[str, str] = {}
+        self._token_entries: list[tuple[str, frozenset[str], int]] = []
+        self._rebuild_indexes()
+
+        if self._config_path is not None:
+            self._reload_from_file(force=True)
+
+    def reload_if_needed(self) -> bool:
+        if self._config_path is None:
+            return False
+        now = time.time()
+        if (now - self._last_reload_check_ts) < self._reload_interval_s:
+            return False
+        self._last_reload_check_ts = now
+        return self._reload_from_file(force=False)
+
+    def map_command(self, transcript: str) -> tuple[str | None, float]:
+        text = _normalize_text(transcript)
+        if not text:
+            return None, 0.0
+
+        if text in self._exact_alias_to_command:
+            return self._exact_alias_to_command[text], 1.0
+
+        words = set(text.split())
+        if not words:
+            return None, 0.0
+
+        best_command: str | None = None
+        best_score = 0.0
+
+        # Lightweight token-subset scoring for phrase variations.
+        for command, tokens, token_count in self._token_entries:
+            if token_count == 0:
+                continue
+            overlap = len(words.intersection(tokens))
+            if overlap == 0:
+                continue
+            score = overlap / token_count
+            if score > best_score:
+                best_score = score
+                best_command = command
+
+        return best_command, best_score
+
+    def _merge_groups(self, updates: dict[str, list[str]]) -> None:
+        for command, aliases in updates.items():
+            if not isinstance(aliases, list):
+                continue
+            normalized_aliases = [a for a in aliases if isinstance(a, str) and a.strip()]
+            if not normalized_aliases:
+                continue
+            base = self._groups.get(command, [])
+            self._groups[command] = list(dict.fromkeys(base + normalized_aliases))
+
+    def _rebuild_indexes(self) -> None:
+        exact: dict[str, str] = {}
+        token_entries: list[tuple[str, frozenset[str], int]] = []
+        for command, aliases in self._groups.items():
+            for alias in aliases:
+                normalized = _normalize_text(alias)
+                if not normalized:
+                    continue
+                exact[normalized] = command
+                token_set = frozenset(normalized.split())
+                token_entries.append((command, token_set, len(token_set)))
+
+        self._exact_alias_to_command = exact
+        self._token_entries = token_entries
+
+    def _reload_from_file(self, force: bool) -> bool:
+        assert self._config_path is not None
+        try:
+            mtime = self._config_path.stat().st_mtime
+        except FileNotFoundError:
+            return False
+
+        if not force and self._last_mtime is not None and mtime == self._last_mtime:
+            return False
+
+        try:
+            with open(self._config_path, 'r', encoding='utf-8') as fh:
+                data = json.load(fh)
+        except Exception:
+            return False
+
+        if not isinstance(data, dict):
+            return False
+
+        raw_groups = data.get('command_groups', {})
+        groups = dict(DEFAULT_COMMAND_GROUPS)
+        if isinstance(raw_groups, dict):
+            for command, aliases in raw_groups.items():
+                if not isinstance(command, str) or not isinstance(aliases, list):
+                    continue
+                valid_aliases = [a for a in aliases if isinstance(a, str) and a.strip()]
+                if valid_aliases:
+                    groups[command] = list(dict.fromkeys(valid_aliases))
+
+        self._groups = groups
+        self._rebuild_indexes()
+        self._last_mtime = mtime
+        return True
 
 
 class VoiceCommandListener:
@@ -47,6 +260,9 @@ class VoiceCommandListener:
         poll_sleep_s: float = 0.05,
         energy_threshold: int = 250,
         recognition_language: str = 'en-IN',
+        confidence_threshold: float = 0.6,
+        command_groups: dict[str, list[str]] | None = None,
+        command_config_path: str | Path | None = None,
     ) -> None:
         self._enabled = bool(enabled)
         self._listen_timeout_s = float(listen_timeout_s)
@@ -54,6 +270,11 @@ class VoiceCommandListener:
         self._poll_sleep_s = float(poll_sleep_s)
         self._energy_threshold = int(energy_threshold)
         self._recognition_language = str(recognition_language or 'en-IN')
+        self._confidence_threshold = max(0.0, min(1.0, float(confidence_threshold)))
+        self._mapper = VoiceCommandMapper(
+            command_groups=command_groups,
+            config_path=command_config_path,
+        )
 
         self._events: queue.Queue[VoiceCommandEvent] = queue.Queue(maxsize=32)
         self._stop_event = threading.Event()
@@ -228,14 +449,16 @@ class VoiceCommandListener:
         if not transcript:
             return
 
-        command = normalize_voice_command(transcript)
-        if command is None:
+        self._mapper.reload_if_needed()
+        command, confidence = self._mapper.map_command(transcript)
+        if command is None or confidence < self._confidence_threshold:
             command = '__unmapped__'
 
         evt = VoiceCommandEvent(
             command=command,
             transcript=transcript,
             timestamp=time.time(),
+            confidence=confidence,
         )
         try:
             self._events.put_nowait(evt)
@@ -246,95 +469,8 @@ class VoiceCommandListener:
 
 def normalize_voice_command(transcript: str) -> str | None:
     """Map free-form speech to canonical command tokens."""
-    text = re.sub(r'[^a-z0-9\s]', ' ', transcript.lower()).strip()
-    text = re.sub(r'\s+', ' ', text)
-    words = set(text.split())
-
-    if not text:
+    mapper = VoiceCommandMapper()
+    command, confidence = mapper.map_command(transcript)
+    if command is None or confidence < 0.5:
         return None
-
-    def _has_prefix(*prefixes: str) -> bool:
-        return any(any(w.startswith(p) for p in prefixes) for w in words)
-
-    if (
-        any(v in words for v in ('open', 'launch', 'start'))
-        and ('brave' in words or _has_prefix('brav', 'grave') or 'browser' in words)
-    ):
-        return 'open_brave'
-
-    if (
-        any(v in words for v in ('open', 'launch', 'start'))
-        and ('youtube' in words or 'you tube' in text or _has_prefix('youtub'))
-    ):
-        return 'open_youtube'
-
-    if any(k in text for k in (
-        'open brave',
-        'open brave browser',
-        'open browser',
-        'launch brave',
-        'start brave',
-    )):
-        return 'open_brave'
-
-    if any(k in text for k in (
-        'open apple music',
-        'open music',
-        'launch apple music',
-        'start music',
-    )):
-        return 'open_apple_music'
-
-    if any(k in text for k in (
-        'open youtube',
-        'launch youtube',
-        'start youtube',
-    )):
-        return 'open_youtube'
-
-    if any(k in text for k in (
-        'close window',
-        'close this window',
-        'close app',
-    )):
-        return 'close_window'
-    if (
-        any(v in words for v in ('close', 'shut', 'exit'))
-        and any(t in words for t in ('window', 'app', 'application'))
-    ):
-        return 'close_window'
-
-    if any(k in text for k in (
-        'switch tab',
-        'next tab',
-        'change tab',
-    )):
-        return 'switch_tab'
-    if 'tab' in words and any(v in words for v in ('switch', 'next', 'change', 'move')):
-        return 'switch_tab'
-
-    if any(k in text for k in (
-        'scroll down',
-        'page down',
-        'move down',
-    )):
-        return 'scroll_down'
-    if 'down' in words and any(v in words for v in ('scroll', 'page', 'move')):
-        return 'scroll_down'
-
-    if any(k in text for k in ('play song', 'play music', 'play', 'resume')):
-        return 'play_song'
-    if any(k in text for k in ('pause song', 'pause music', 'pause', 'stop music')):
-        return 'pause'
-    if any(k in text for k in ('next track', 'next song', 'skip')):
-        return 'next_track'
-    if any(k in text for k in ('previous track', 'previous song', 'back track')):
-        return 'previous_track'
-    if any(k in text for k in ('volume up', 'increase volume', 'louder')):
-        return 'volume_up'
-    if any(k in text for k in ('volume down', 'decrease volume', 'softer')):
-        return 'volume_down'
-    if any(k in text for k in ('mute', 'silence')):
-        return 'mute'
-
-    return None
+    return command

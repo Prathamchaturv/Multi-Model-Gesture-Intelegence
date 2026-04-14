@@ -236,6 +236,18 @@ class UnifiedDecisionPipeline:
             face_is_verified = auth_result.is_authorized
             log_security_check(auth_result.is_authorized, auth_result.status_text)
 
+        # Strict security mode: when face enforcement is requested and face
+        # security is enabled for this run, do not execute any action while
+        # the current user is not verified.
+        if enforce_face_security and face_security_enabled and not face_is_verified:
+            return PipelineDecision(
+                action=None,
+                mode_changed=False,
+                mode=self._mode_manager.current_mode,
+                blocked_reason='face_unauthorized',
+                security_status=auth_result.status_text if auth_result is not None else 'Face authorization required',
+            )
+
         # Legacy compatibility path: preserve strict face blocking only when
         # adaptive authorization is not enabled.
         if self._authorization_engine is None and enforce_face_security and self._face_security is not None:
@@ -255,7 +267,7 @@ class UnifiedDecisionPipeline:
         if self._runtime_controller is not None:
             allowed, reason = self._runtime_controller.can_execute_action(
                 action=action,
-                face_authorized=True,
+                face_authorized=face_is_verified,
                 activation_locked=False,
                 confidence=getattr(decision, 'confidence', event.confidence),
             )

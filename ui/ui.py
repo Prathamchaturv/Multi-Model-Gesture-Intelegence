@@ -590,7 +590,7 @@ ANIM_MS     = 200
 _TABS = [
     ('vision',   'VI', 'Vision'),
     ('gestures', 'GE', 'Gestures'),
-    ('mode',     'MO', 'Modes'),
+    ('help',     'GD', 'Guide'),
     ('logs',     'LG', 'Logs'),
     ('settings', 'ST', 'Settings'),
 ]
@@ -2373,7 +2373,7 @@ class HelpGuidePanel(QWidget):
         title.setStyleSheet(f'color: {ACCENT}; font-size: 16px; font-weight: 700; letter-spacing: 2px;')
         root.addWidget(title)
 
-        subtitle = QLabel('Follow these steps to activate MMGI, use gestures, and switch modes confidently.')
+        subtitle = QLabel('New here? Follow this flow from launch to daily use, including mode switching and safety behavior.')
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(f'color: {TEXT_SEC}; font-size: 12px;')
         root.addWidget(subtitle)
@@ -2390,23 +2390,25 @@ class HelpGuidePanel(QWidget):
         self._content_lay.setSpacing(10)
 
         self._content_lay.addWidget(self._instruction_card(
-            'How To Activate System',
+            '1) Start The System',
             [
-                '1. Face your hand toward the camera with Open Palm.',
-                '2. Hold Open Palm steadily for 2 seconds.',
-                '3. Wait for status to change to ACTIVE before giving commands.',
+                '1. Click Start in the top-right header.',
+                '2. Confirm live camera feed appears in Vision.',
+                '3. Keep your face visible if Face Security is enabled.',
+                '4. Show Open Palm steadily for ~2 seconds to arm control.',
             ],
         ))
         self._content_lay.addWidget(self._instruction_card(
-            'How To Use Gestures',
+            '2) Use Gestures Reliably',
             [
                 '1. Keep your hand centered and well-lit for accurate tracking.',
                 '2. Show one clear gesture at a time.',
                 '3. Hold the gesture briefly until action feedback appears.',
+                '4. If status shows Waiting for stable gesture, keep your hand still and retry.',
             ],
         ))
         self._content_lay.addWidget(self._instruction_card(
-            'How To Switch Modes',
+            '3) Switch Modes',
             [
                 '1. Hold Three Fingers for about 1 second.',
                 '2. Modes cycle in order: App -> Media -> System -> App.',
@@ -2414,11 +2416,28 @@ class HelpGuidePanel(QWidget):
             ],
         ))
         self._content_lay.addWidget(self._instruction_card(
-            'New Features (Latest)',
+            '4) What Each Mode Does',
             [
-                '1. Login supports Face Recognition along with User-Password.',
-                '2. In Settings -> Security, enable Face Security and capture your authorized face.',
-                '3. In System Mode, use Voice Command for actions like Open Brave, Open YouTube, Close Window, Switch Tab, and Scroll Down.',
+                '1. App Mode: quick app actions like browser/music/video open and close window.',
+                '2. Media Mode: playback and volume actions (play/pause, next, previous, mute).',
+                '3. System Mode: system controls plus voice commands depending on your config.',
+                '4. See CURRENT GESTURE MAPPING below for your exact live mappings.',
+            ],
+        ))
+        self._content_lay.addWidget(self._instruction_card(
+            '5) Face Security And Safety States',
+            [
+                '1. If face status shows LOCKED or User Away, runtime pauses and actions are blocked.',
+                '2. Re-enter camera view and stabilize; status should return to UNLOCKED before actions resume.',
+                '3. Other pause reasons can include low confidence or no hand detected.',
+            ],
+        ))
+        self._content_lay.addWidget(self._instruction_card(
+            '6) End Session',
+            [
+                '1. Click Stop to end tracking cleanly.',
+                '2. Use Restart if camera/mic stream needs a fresh start.',
+                '3. Optional: switch to Logs tab to review runtime events.',
             ],
         ))
 
@@ -3449,13 +3468,11 @@ class MainWindow(QMainWindow):
         if tab_id == 'gestures':
             self._gesture_map_panel.reload()
             self._body_stack.setCurrentIndex(1)
-        elif tab_id == 'mode':
-            self._body_stack.setCurrentIndex(0)
-        elif tab_id == 'logs':
-            self._body_stack.setCurrentIndex(4)
         elif tab_id == 'help':
             self._help_panel.refresh()
             self._body_stack.setCurrentIndex(2)
+        elif tab_id == 'logs':
+            self._body_stack.setCurrentIndex(4)
         elif tab_id == 'settings':
             self._settings_panel.refresh()
             self._body_stack.setCurrentIndex(3)

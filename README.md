@@ -194,6 +194,19 @@ Example commands:
 
 - python main.py
 
+### First-Time Quick Guide (New User Flow)
+
+1. Launch dashboard: `python main.py`
+2. Click `Start` in the header.
+3. Ensure your camera feed is visible and your face is in frame (if Face Security is enabled).
+4. Show `Open Palm` for about 2 seconds to activate control.
+5. Use one gesture at a time with a steady hand.
+6. Switch mode by showing `Three Fingers` for ~1 second:
+  - App Mode -> Media Mode -> System Mode -> App Mode
+7. Check the right panel + runtime chips for safety state:
+  - `LOCKED` / `User Away` means actions are paused until face auth recovers.
+8. Open the in-app `Guide` tab (left sidebar) for step-by-step usage and live gesture mapping.
+
 ### Run Headless Mode (No UI)
 
 - python main.py --no-ui

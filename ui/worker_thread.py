@@ -1217,7 +1217,6 @@ class WorkerThread(QThread):
                 gesture_for_activation = effective_gesture
 
                 should_execute = activation_manager.update(gesture_for_activation)
-                state.set_system_active(activation_manager.is_active)
                 state.set_cooldown(activation_manager.is_in_cooldown)
                 system_is_active = activation_manager.is_active
 
@@ -1229,17 +1228,26 @@ class WorkerThread(QThread):
                     uncertainty_lock_until = max(uncertainty_lock_until, time.time() + 0.8)
                     uncertainty_streak = 0
 
-                lock_active = time.time() < uncertainty_lock_until
+                face_lock_active = bool(
+                    face_role_provider_active
+                    and system_is_active
+                    and (not face_authorized)
+                )
+                lock_active = (time.time() < uncertainty_lock_until) or face_lock_active
                 runtime_locked_reason = None
                 if lock_active:
-                    runtime_locked_reason = 'Uncertain gesture input'
-                    if not uncertainty_lock_was_active:
-                        now = time.time()
-                        if now - last_safety_lock_log >= 6.0:
-                            state.emit_log(_ts(), 'SYSTEM', 'Safety lock: actions paused due to uncertain input')
-                            last_safety_lock_log = now
-                        log_runtime_error('Safety lock active due to uncertain gesture input')
-                    uncertainty_lock_was_active = True
+                    if face_lock_active:
+                        runtime_locked_reason = 'Face authorization required'
+                        uncertainty_lock_was_active = False
+                    else:
+                        runtime_locked_reason = 'Uncertain gesture input'
+                        if not uncertainty_lock_was_active:
+                            now = time.time()
+                            if now - last_safety_lock_log >= 6.0:
+                                state.emit_log(_ts(), 'SYSTEM', 'Safety lock: actions paused due to uncertain input')
+                                last_safety_lock_log = now
+                            log_runtime_error('Safety lock active due to uncertain gesture input')
+                        uncertainty_lock_was_active = True
                 else:
                     uncertainty_lock_was_active = False
                     is_mode_switch_gesture = bool(
@@ -1351,6 +1359,8 @@ class WorkerThread(QThread):
                 if runtime_locked_reason is None:
                     if not gesture_processing_enabled:
                         runtime_locked_reason = 'Gesture control disabled'
+                    elif face_lock_active:
+                        runtime_locked_reason = 'Face authorization required'
                     elif overload_guard.active:
                         runtime_locked_reason = 'Overload protection'
                     elif not hand_present:
@@ -1367,11 +1377,15 @@ class WorkerThread(QThread):
                     runtime_controller.set_state(RuntimeState.RUNNING, 'Runtime healthy')
                     state.set_runtime_state(RuntimeState.RUNNING.value, 'Runtime healthy')
 
+                # Reflect actionable state in UI: "active" means execution-ready,
+                # not just activation gesture latched.
+                state.set_system_active(system_is_active and not bool(runtime_locked_reason))
+
                 for event, forced_action, source_label, event_start_perf in pending_events:
                     if forced_action is not None:
                         allowed, blocked_reason = runtime_controller.can_execute_action(
                             action=forced_action,
-                            face_authorized=True,
+                            face_authorized=face_authorized,
                             activation_locked=bool(runtime_locked_reason),
                             confidence=confidence,
                         )
@@ -1406,7 +1420,7 @@ class WorkerThread(QThread):
                     result = unified_pipeline.process_event(
                         event,
                         frame_bgr=frame,
-                        enforce_face_security=False,
+                        enforce_face_security=face_security_enabled,
                         face_security_enabled=face_security_enabled,
                         face_verified=face_authorized,
                     )
@@ -1450,6 +1464,9 @@ class WorkerThread(QThread):
                 if not gesture_processing_enabled:
                     activation_locked = True
                     lock_reason = 'Gesture control disabled'
+                elif face_lock_active:
+                    activation_locked = True
+                    lock_reason = 'Face authorization required'
                 elif time.time() < uncertainty_lock_until:
                     activation_locked = True
                     lock_reason = 'Uncertain gesture input'
@@ -1464,7 +1481,7 @@ class WorkerThread(QThread):
                     and system_is_active
                     and (not latest_face_detected)
                 )
-                auth_required_active = False
+                auth_required_active = face_lock_active
                 cooldown_active = runtime_controller.is_cooldown_active and (not activation_locked)
 
                 state.set_fail_safe_states(
@@ -1570,7 +1587,7 @@ class WorkerThread(QThread):
                     frame,
                     gesture,
                     mode_manager.current_mode,
-                    activation_manager.is_active,
+                    system_is_active and not bool(runtime_locked_reason),
                     fps_counter.fps,
                     latency_ms=latency_ms,
                     e2e_latency_ms=last_action_e2e_latency_ms,

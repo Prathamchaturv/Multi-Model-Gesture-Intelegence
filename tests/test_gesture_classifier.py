@@ -59,9 +59,9 @@ class TestGestureClassifier(unittest.TestCase):
         states = {'thumb': False, 'index': False, 'middle': False, 'ring': False, 'pinky': True}
         self.assertEqual(self.clf.classify(states), 'Pinky')
 
-    def test_ring_and_pinky(self) -> None:
-        states = {'thumb': False, 'index': False, 'middle': False, 'ring': True, 'pinky': True}
-        self.assertEqual(self.clf.classify(states), 'Ring and Pinky')
+    def test_thumb_index_middle_and_ring(self) -> None:
+        states = {'thumb': True, 'index': True, 'middle': True, 'ring': True, 'pinky': False}
+        self.assertEqual(self.clf.classify(states), 'Thumb, Index, Middle and Ring')
 
     # ------------------------------------------------------------------
     # Edge cases
@@ -98,7 +98,7 @@ class TestGestureClassifier(unittest.TestCase):
             ('Three Fingers',  {'index': True,  'middle': True,  'ring': True,  'pinky': False}),
             ('Four Fingers',   {'index': True,  'middle': True,  'ring': True,  'pinky': True}),
             ('Pinky',          {'index': False, 'middle': False, 'ring': False, 'pinky': True}),
-            ('Ring and Pinky', {'index': False, 'middle': False, 'ring': True,  'pinky': True}),
+            ('Thumb, Index, Middle and Ring', {'thumb': True, 'index': True, 'middle': True, 'ring': True, 'pinky': False}),
         ]
         for name, states in expected_patterns:
             with self.subTest(gesture=name):
@@ -143,5 +143,5 @@ def test_two_fingers():
 
 
 def test_classify_gesture_accepts_dict():
-    states = {'thumb': False, 'index': False, 'middle': False, 'ring': True, 'pinky': True}
-    assert classify_gesture(states) == 'Ring and Pinky'
+    states = {'thumb': True, 'index': True, 'middle': True, 'ring': True, 'pinky': False}
+    assert classify_gesture(states) == 'Thumb, Index, Middle and Ring'

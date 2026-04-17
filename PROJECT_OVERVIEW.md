@@ -114,7 +114,7 @@ Calls `SharedState.set_*()` to push telemetry to connected UI widgets.
     "One Finger":"open_brave",
     "Two Fingers":"open_apple_music",
     "Thumbs Up":"open_youtube",
-    "Ring and Pinky":"close_window"
+    "Thumb, Index, Middle and Ring":"close_window"
   },
   "Media Mode":   {
     "One Finger":"volume_up",
@@ -128,7 +128,7 @@ Calls `SharedState.set_*()` to push telemetry to connected UI widgets.
     "Thumb and Index":"scroll_up",
     "Thumb, Index and Middle":"scroll_down",
     "Two Fingers":"left_click",
-    "Ring and Pinky":"right_click"
+    "Thumb, Index, Middle and Ring":"right_click"
   }
 }
 ```

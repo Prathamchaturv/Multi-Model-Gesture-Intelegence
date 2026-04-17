@@ -14,7 +14,7 @@ Provides full air-mouse control when 'System Mode' is active:
     Index fingertip     →  Move cursor  (continuous)
     Thumb+index pinch   →  Left click   (rising edge)
     Two Fingers         →  Scroll       (optional, backward compatible)
-    Ring and Pinky      →  Right click  (optional, backward compatible)
+    Thumb, Index, Middle and Ring →  Right click  (optional, backward compatible)
     Thumbs Up           →  Double-click (optional, backward compatible)
     Three Fingers       →  Mode switch  (handled by DecisionEngine upstream)
     Open Palm / Fist    →  Activate / Deactivate  (ActivationManager upstream)
@@ -177,8 +177,8 @@ class AirMouseController:
         elif gesture == 'Two Fingers':
             action_taken = self._scroll(landmarks)
 
-        # ── Right click (Ring and Pinky — rising edge) ───────────────────
-        elif gesture == 'Ring and Pinky' and self._prev_gesture != 'Ring and Pinky':
+        # ── Right click (Thumb, Index, Middle and Ring — rising edge) ───
+        elif gesture == 'Thumb, Index, Middle and Ring' and self._prev_gesture != 'Thumb, Index, Middle and Ring':
             action_taken = self._right_click()
 
         # ── Double-click (Thumbs Up — rising edge) ───────────────────────

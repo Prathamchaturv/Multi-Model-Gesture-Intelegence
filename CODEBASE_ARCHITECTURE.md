@@ -339,7 +339,7 @@ class GestureClassifier:
 | `Two Fingers` | Index + middle only | Peace sign / scroll |
 | `Three Fingers` | Index + middle + ring | **Mode switch** |
 | `Four Fingers` | All except thumb | Media control |
-| `Ring and Pinky` | Ring + pinky only | Alternative gesture |
+| `Thumb, Index, Middle and Ring` | Thumb + index + middle + ring | Alternative gesture |
 | `Pinky` | Pinky only | Alternative gesture |
 | `Unknown` | No match | Invalid/transitional state |
 

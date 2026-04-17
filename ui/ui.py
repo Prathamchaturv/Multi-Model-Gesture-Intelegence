@@ -494,18 +494,20 @@ class ControlPanel(QFrame):
         lay.addWidget(mode_lbl)
         
         mode_btns = QHBoxLayout()
-        mode_btns.setSpacing(8)
+        mode_btns.setSpacing(6)
         
         self._mode_btns: dict[str, QPushButton] = {}
         modes = [
-            ('App Mode', MODE_APP, ACCENT),
-            ('Media Mode', MODE_MEDIA, ACCENT_SOFT),
-            ('System Mode', MODE_SYSTEM, WARNING),
+            ('App Mode', 'APP', MODE_APP, ACCENT),
+            ('Media Mode', 'MEDIA', MODE_MEDIA, ACCENT_SOFT),
+            ('System Mode', 'SYSTEM', MODE_SYSTEM, WARNING),
         ]
-        
-        for mode_name, color, _ in modes:
-            btn = QPushButton(mode_name)
+
+        for mode_name, mode_label, color, _ in modes:
+            btn = QPushButton(mode_label)
             btn.setFixedHeight(32)
+            btn.setMinimumWidth(0)
+            btn.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setStyleSheet(f"""
                 QPushButton {{
@@ -522,8 +524,7 @@ class ControlPanel(QFrame):
             btn.clicked.connect(lambda checked=False, m=mode_name: self._on_mode_selected(m))
             mode_btns.addWidget(btn)
             self._mode_btns[mode_name] = btn
-        
-        mode_btns.addStretch()
+
         lay.addLayout(mode_btns)
         
         # ─── Feature Toggles ──────────────────────────────────────────────
@@ -1738,20 +1739,22 @@ class GestureGuideCard(QFrame):
             grid_w.setStyleSheet('background: transparent;')
             grid = QGridLayout(grid_w)
             grid.setContentsMargins(0, 0, 0, 0)
-            grid.setHorizontalSpacing(8)
+            grid.setHorizontalSpacing(6)
             grid.setVerticalSpacing(4)
-            grid.setColumnStretch(0, 3)
-            grid.setColumnStretch(1, 2)
+            grid.setColumnStretch(0, 2)
+            grid.setColumnStretch(1, 1)
 
             for r, (gesture, action) in enumerate(gestures.items()):
                 action_label = _ACTION_DISPLAY_LABELS.get(action, action)
                 lbl_g = QLabel(gesture)
                 lbl_g.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 lbl_g.setWordWrap(True)
+                lbl_g.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 lbl_g.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
                 lbl_a = QLabel(action_label)
                 lbl_a.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 lbl_a.setWordWrap(True)
+                lbl_a.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
                 lbl_a.setStyleSheet(f'color: {ACCENT}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
                 grid.addWidget(lbl_g, r, 0)
                 grid.addWidget(lbl_a, r, 1)
@@ -3255,8 +3258,8 @@ class SystemPanel(QWidget):
         self._build(state)
 
     def _build(self, state: SharedState) -> None:
-        self.setMinimumWidth(280)
-        self.setMaximumWidth(380)
+        self.setMinimumWidth(210)
+        self.setMaximumWidth(280)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.setStyleSheet(f'background-color: {BG_DEEP};')
 

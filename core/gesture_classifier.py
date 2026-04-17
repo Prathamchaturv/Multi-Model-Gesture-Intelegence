@@ -21,7 +21,7 @@ Recognised gestures:
     Two Fingers            – index + middle up             (peace sign)
     Three Fingers          – index + middle + ring up      (mode cycle trigger)
     Four Fingers           – index + middle + ring + pinky up
-    Ring and Pinky         – ring + pinky only up
+    Thumb, Index, Middle and Ring – thumb + index + middle + ring up
     Pinky                  – only pinky up
 """
 
@@ -45,10 +45,10 @@ class GestureClassifier:
         ('Thumbs Up',               {'thumb': True,  'index': False, 'middle': False, 'ring': False, 'pinky': False}),
         ('Thumb and Index',         {'thumb': True,  'index': True,  'middle': False, 'ring': False, 'pinky': False}),
         ('Thumb, Index and Middle', {'thumb': True,  'index': True,  'middle': True,  'ring': False, 'pinky': False}),
+        ('Thumb, Index, Middle and Ring', {'thumb': True, 'index': True, 'middle': True, 'ring': True, 'pinky': False}),
         ('Three Fingers',           {'index': True,  'middle': True,  'ring': True,  'pinky': False}),
         ('Four Fingers',            {'index': True,  'middle': True,  'ring': True,  'pinky': True}),
         ('Two Fingers',             {'index': True,  'middle': True,  'ring': False, 'pinky': False}),
-        ('Ring and Pinky',          {'index': False, 'middle': False, 'ring': True,  'pinky': True}),
         ('One Finger',              {'index': True,  'middle': False, 'ring': False, 'pinky': False}),
         ('Pinky',                   {'index': False, 'middle': False, 'ring': False, 'pinky': True}),
     ]

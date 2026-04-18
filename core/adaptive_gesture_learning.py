@@ -134,18 +134,29 @@ class CustomGestureStore:
             {
                 'name': name,
                 'action': data['action'],
+                'mode': data.get('mode', 'App Mode'),
                 'pattern': data['pattern'],
             }
             for name, data in sorted(self._gestures.items(), key=lambda item: item[0].lower())
         ]
 
-    def add_or_update(self, name: str, normalized_pattern: list[list[float]], action: str) -> None:
+    def add_or_update(
+        self,
+        name: str,
+        normalized_pattern: list[list[float]],
+        action: str,
+        mode: str = 'App Mode',
+    ) -> None:
         clean_name = (name or '').strip()
         clean_action = (action or '').strip()
+        clean_mode = (mode or '').strip() or 'App Mode'
+        valid_modes = {'App Mode', 'Media Mode', 'System Mode'}
         if not clean_name:
             raise GestureDataError('Gesture name cannot be empty.')
         if not clean_action:
             raise GestureDataError('Gesture action cannot be empty.')
+        if clean_mode not in valid_modes:
+            raise GestureDataError(f'Invalid gesture mode: {clean_mode}')
 
         pattern_arr = np.asarray(normalized_pattern, dtype=np.float32)
         if pattern_arr.shape != (21, 3):
@@ -153,6 +164,7 @@ class CustomGestureStore:
 
         self._gestures[clean_name] = {
             'action': clean_action,
+            'mode': clean_mode,
             'pattern': pattern_arr.tolist(),
         }
         self.save()
@@ -185,11 +197,15 @@ class CustomGestureStore:
             try:
                 name = str(item['name']).strip()
                 action = str(item['action']).strip()
+                mode = str(item.get('mode', 'App Mode')).strip() or 'App Mode'
                 pattern = np.asarray(item['pattern'], dtype=np.float32)
                 if not name or not action or pattern.shape != (21, 3):
                     continue
+                if mode not in {'App Mode', 'Media Mode', 'System Mode'}:
+                    mode = 'App Mode'
                 loaded[name] = {
                     'action': action,
+                    'mode': mode,
                     'pattern': pattern.tolist(),
                 }
             except Exception:
@@ -206,6 +222,7 @@ class CustomGestureStore:
                 {
                     'name': name,
                     'action': data['action'],
+                    'mode': data.get('mode', 'App Mode'),
                     'pattern': data['pattern'],
                 }
                 for name, data in sorted(self._gestures.items(), key=lambda item: item[0].lower())

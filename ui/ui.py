@@ -1457,10 +1457,10 @@ class ModeCard(QFrame):
         self._instr_container.setStyleSheet('background: transparent;')
         self._instr_lay = QGridLayout(self._instr_container)
         self._instr_lay.setContentsMargins(0, 2, 0, 2)
-        self._instr_lay.setHorizontalSpacing(8)
+        self._instr_lay.setHorizontalSpacing(6)
         self._instr_lay.setVerticalSpacing(5)
-        self._instr_lay.setColumnStretch(0, 3)
-        self._instr_lay.setColumnStretch(1, 2)
+        self._instr_lay.setColumnStretch(0, 5)
+        self._instr_lay.setColumnStretch(1, 4)
         self._lay.addWidget(self._instr_container)
 
         self._lay.addWidget(_divider())
@@ -1493,10 +1493,12 @@ class ModeCard(QFrame):
             lbl_l.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             lbl_l.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
             lbl_l.setWordWrap(True)
+            lbl_l.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             lbl_r = QLabel(action_lbl)
             lbl_r.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             lbl_r.setStyleSheet(f'color: {ACCENT}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
             lbl_r.setWordWrap(True)
+            lbl_r.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
             self._instr_lay.addWidget(lbl_l, r, 0)
             self._instr_lay.addWidget(lbl_r, r, 1)
         if not instructions:
@@ -1741,20 +1743,20 @@ class GestureGuideCard(QFrame):
             grid.setContentsMargins(0, 0, 0, 0)
             grid.setHorizontalSpacing(6)
             grid.setVerticalSpacing(4)
-            grid.setColumnStretch(0, 2)
-            grid.setColumnStretch(1, 1)
+            grid.setColumnStretch(0, 5)
+            grid.setColumnStretch(1, 4)
 
             for r, (gesture, action) in enumerate(gestures.items()):
                 action_label = _ACTION_DISPLAY_LABELS.get(action, action)
                 lbl_g = QLabel(gesture)
                 lbl_g.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 lbl_g.setWordWrap(True)
-                lbl_g.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+                lbl_g.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
                 lbl_g.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
                 lbl_a = QLabel(action_label)
                 lbl_a.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 lbl_a.setWordWrap(True)
-                lbl_a.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+                lbl_a.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
                 lbl_a.setStyleSheet(f'color: {ACCENT}; font-size: 11px; font-weight: 600; background: transparent; border: none;')
                 grid.addWidget(lbl_g, r, 0)
                 grid.addWidget(lbl_a, r, 1)
@@ -1792,6 +1794,7 @@ class GestureMapPanel(QWidget):
         self._training_active = False
         self._training_name = ''
         self._training_action = ''
+        self._training_mode = 'App Mode'
 
         self._build_ui()
         self._load_map()
@@ -1874,6 +1877,11 @@ class GestureMapPanel(QWidget):
         for action_label in _CUSTOM_ACTION_DISPLAY_LABELS.values():
             self._custom_action_combo.addItem(action_label)
 
+        self._custom_mode_combo = QComboBox()
+        self._custom_mode_combo.setStyleSheet(self._custom_action_combo.styleSheet())
+        for mode_name in ['App Mode', 'Media Mode', 'System Mode']:
+            self._custom_mode_combo.addItem(mode_name)
+
         self._train_btn = QPushButton('Train New Gesture')
         self._train_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._train_btn.setStyleSheet(f"""
@@ -1887,6 +1895,7 @@ class GestureMapPanel(QWidget):
 
         row.addWidget(self._gesture_name_input, stretch=2)
         row.addWidget(self._custom_action_combo, stretch=2)
+        row.addWidget(self._custom_mode_combo, stretch=1)
         row.addWidget(self._train_btn)
         train_content_lay.addLayout(row)
 
@@ -1904,7 +1913,7 @@ class GestureMapPanel(QWidget):
         """)
         train_content_lay.addWidget(self._train_progress)
 
-        self._train_status = QLabel('Enter name and action, then click Train New Gesture.')
+        self._train_status = QLabel('Enter name, action, mode, then click Train New Gesture.')
         self._train_status.setFixedHeight(18)
         self._train_status.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px;')
         train_content_lay.addWidget(self._train_status)
@@ -2192,6 +2201,7 @@ class GestureMapPanel(QWidget):
     def _set_training_inputs_enabled(self, enabled: bool) -> None:
         self._gesture_name_input.setEnabled(enabled)
         self._custom_action_combo.setEnabled(enabled)
+        self._custom_mode_combo.setEnabled(enabled)
         self._delete_custom_btn.setEnabled(enabled)
 
     def _set_section_collapsed(self, content: QWidget, button: QPushButton, collapsed: bool, label: str) -> None:
@@ -2239,16 +2249,23 @@ class GestureMapPanel(QWidget):
             self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
             return
 
+        selected_mode = self._custom_mode_combo.currentText().strip()
+        if selected_mode not in {'App Mode', 'Media Mode', 'System Mode'}:
+            self._train_status.setText('Please choose a valid mode.')
+            self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+            return
+
         self._recorder.reset()
         self._train_progress.setMaximum(self._recorder.target_frames)
         self._train_progress.setValue(0)
         self._training_name = gesture_name
         self._training_action = action_key
+        self._training_mode = selected_mode
         self._training_active = True
         self._set_section_collapsed(self._train_content, self._train_toggle_btn, False, self._TRAIN_SECTION_LABEL)
         self._train_btn.setText('Cancel Training')
         self._set_training_inputs_enabled(False)
-        self._train_status.setText('Training started. Hold your gesture steadily in view.')
+        self._train_status.setText(f'Training started for {self._training_mode}. Hold your gesture steadily in view.')
         self._train_status.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px;')
 
     @pyqtSlot(object)
@@ -2283,10 +2300,13 @@ class GestureMapPanel(QWidget):
                 self._training_name,
                 pattern,
                 self._training_action,
+                mode=self._training_mode,
             )
+            self._save_mapping(self._training_mode, self._training_name, self._training_action)
             self._train_status.setText(
                 f'Saved custom gesture "{self._training_name}" mapped to '
-                f'{_CUSTOM_ACTION_DISPLAY_LABELS.get(self._training_action, self._training_action)}.'
+                f'{_CUSTOM_ACTION_DISPLAY_LABELS.get(self._training_action, self._training_action)} '
+                f'in {self._training_mode}.'
             )
             self._train_status.setStyleSheet(f'color: {ACTIVE}; font-size: 11px;')
             self._refresh_custom_gestures()
@@ -2317,9 +2337,10 @@ class GestureMapPanel(QWidget):
         for item_data in all_gestures:
             name = item_data['name']
             action_key = item_data['action']
+            mode_name = item_data.get('mode', 'App Mode')
             action_label = _CUSTOM_ACTION_DISPLAY_LABELS.get(action_key, action_key)
-            item = QListWidgetItem(f'{name}  ->  {action_label}')
-            item.setData(Qt.ItemDataRole.UserRole, name)
+            item = QListWidgetItem(f'[{mode_name}] {name}  ->  {action_label}')
+            item.setData(Qt.ItemDataRole.UserRole, {'name': name, 'mode': mode_name})
             self._custom_list.addItem(item)
 
     def _delete_selected_custom(self) -> None:
@@ -2329,7 +2350,11 @@ class GestureMapPanel(QWidget):
             self._train_status.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px;')
             return
 
-        gesture_name = selected_item.data(Qt.ItemDataRole.UserRole)
+        payload = selected_item.data(Qt.ItemDataRole.UserRole)
+        if not payload:
+            return
+        gesture_name = str(payload.get('name', '')).strip()
+        mode_name = str(payload.get('mode', 'App Mode')).strip() or 'App Mode'
         if not gesture_name:
             return
 
@@ -2345,12 +2370,25 @@ class GestureMapPanel(QWidget):
 
         deleted = self._custom_store.delete(str(gesture_name))
         if deleted:
+            self._delete_mapping(mode_name, gesture_name)
             self._train_status.setText(f'Deleted custom gesture "{gesture_name}".')
             self._train_status.setStyleSheet(f'color: {ACTIVE}; font-size: 11px;')
             self._refresh_custom_gestures()
         else:
             self._train_status.setText(f'Could not delete "{gesture_name}".')
             self._train_status.setStyleSheet(f'color: {INACTIVE}; font-size: 11px;')
+
+    def _delete_mapping(self, mode: str, gesture: str) -> None:
+        try:
+            data = _load_gesture_map()
+            mode_map = data.get(mode)
+            if isinstance(mode_map, dict) and gesture in mode_map:
+                del mode_map[gesture]
+                with open(_GESTURE_MAP_PATH, 'w', encoding='utf-8') as fh:
+                    json.dump(data, fh, indent=4)
+                self.mapping_changed.emit()
+        except Exception as exc:
+            print(f'[GestureMapPanel] Failed to delete mapping: {exc}')
 
     def reload(self) -> None:
         """Re-read gesture_map.json and refresh the displayed rows."""
@@ -3258,8 +3296,8 @@ class SystemPanel(QWidget):
         self._build(state)
 
     def _build(self, state: SharedState) -> None:
-        self.setMinimumWidth(210)
-        self.setMaximumWidth(280)
+        self.setMinimumWidth(260)
+        self.setMaximumWidth(360)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.setStyleSheet(f'background-color: {BG_DEEP};')
 

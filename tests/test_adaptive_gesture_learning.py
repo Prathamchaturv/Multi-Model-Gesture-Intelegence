@@ -76,6 +76,23 @@ def test_store_persists_and_reloads_gesture() -> None:
         assert len(items) == 1
         assert items[0]['name'] == 'WaveCustom'
         assert items[0]['action'] == 'volume_up'
+        assert items[0]['mode'] == 'App Mode'
+
+
+def test_store_persists_and_reloads_mode() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        store_path = Path(td) / 'custom_gestures.json'
+        store = CustomGestureStore(store_path)
+
+        pattern = normalize_landmarks(_make_landmarks())
+        store.add_or_update('ModeSpecific', pattern, 'open_youtube', mode='Media Mode')
+
+        reloaded = CustomGestureStore(store_path)
+        items = reloaded.list_gestures()
+        assert len(items) == 1
+        assert items[0]['name'] == 'ModeSpecific'
+        assert items[0]['action'] == 'open_youtube'
+        assert items[0]['mode'] == 'Media Mode'
 
 
 def test_matcher_returns_best_match_under_threshold() -> None:

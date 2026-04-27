@@ -67,6 +67,7 @@ class SharedState(QObject):
     fail_safe_flags_changed = pyqtSignal(dict)
     adaptive_auth_feedback_changed = pyqtSignal(str)
     user_state_changed = pyqtSignal(str)
+    context_changed = pyqtSignal(str)
 
     # Batched update – emits a snapshot dict for panels that want everything
     snapshot_ready          = pyqtSignal(dict)
@@ -120,6 +121,7 @@ class SharedState(QObject):
         }
         self._adaptive_auth_feedback = 'Executed'
         self._user_state = 'open'
+        self._context = 'system'
 
     # ------------------------------------------------------------------ getters
     @property
@@ -178,6 +180,8 @@ class SharedState(QObject):
     def adaptive_auth_feedback(self) -> str: return self._adaptive_auth_feedback
     @property
     def user_state(self) -> str: return self._user_state
+    @property
+    def context(self) -> str: return self._context
 
     # ------------------------------------------------------------------ setters
     def set_system_active(self, value: bool) -> None:
@@ -373,6 +377,12 @@ class SharedState(QObject):
             self._user_state = state
             self.user_state_changed.emit(state)
 
+    def set_context(self, value: str) -> None:
+        context = str(value).lower()
+        if self._context != context:
+            self._context = context
+            self.context_changed.emit(context)
+
     def emit_log(self, timestamp: str, category: str, description: str) -> None:
         """Convenience wrapper to push an activity log event."""
         self.log_event.emit(timestamp, category, description)
@@ -409,6 +419,7 @@ class SharedState(QObject):
             'fail_safe_flags': dict(self._fail_safe_flags),
             'adaptive_auth_feedback': self._adaptive_auth_feedback,
             'user_state': self._user_state,
+            'context': self._context,
         }
 
     def _emit_snapshot(self) -> None:

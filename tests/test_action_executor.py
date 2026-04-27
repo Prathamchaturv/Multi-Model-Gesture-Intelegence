@@ -134,6 +134,24 @@ class TestActionExecutorExecution(unittest.TestCase):
             self.executor.execute('prev_track')
         mock_pg.press.assert_called_once_with('prevtrack')
 
+    def test_execute_seek_forward_presses_right_key(self) -> None:
+        with patch('engine.action_executor._PYAUTOGUI', True), \
+             patch('engine.action_executor.pyautogui') as mock_pg:
+            self.executor.execute('seek_forward')
+        mock_pg.press.assert_called_once_with('right')
+
+    def test_execute_seek_backward_presses_left_key(self) -> None:
+        with patch('engine.action_executor._PYAUTOGUI', True), \
+             patch('engine.action_executor.pyautogui') as mock_pg:
+            self.executor.execute('seek_backward')
+        mock_pg.press.assert_called_once_with('left')
+
+    def test_execute_switch_apps_uses_alt_tab_hotkey(self) -> None:
+        with patch('engine.action_executor._PYAUTOGUI', True), \
+             patch('engine.action_executor.pyautogui') as mock_pg:
+            self.executor.execute('switch_apps')
+        mock_pg.hotkey.assert_called_once_with('alt', 'tab')
+
     def test_unknown_action_does_not_raise(self) -> None:
         """Executing an unrecognised action key must not raise an exception."""
         try:

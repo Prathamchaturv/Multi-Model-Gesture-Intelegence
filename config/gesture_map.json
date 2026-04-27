@@ -13,7 +13,8 @@
         "One Finger": "open_brave",
         "Two Fingers": "open_apple_music",
         "Thumbs Up": "open_youtube",
-        "Thumb, Index, Middle and Ring": "close_window"
+        "Thumb, Index, Middle and Ring": "close_window",
+        "Thumb and Idex": "open_brave"
     },
     "Media Mode": {
         "One Finger": "volume_up",

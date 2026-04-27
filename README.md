@@ -30,6 +30,7 @@ This multimodal approach improves reliability, usability, and safety in dynamic 
 - Speech-to-command normalization and mapping
 - In-dashboard voice controls with live status and command feedback
 - Voice-assisted action triggering through the unified decision flow
+- Noisy-environment hardening with ambient calibration, denoising, adaptive confidence, and retry/backoff
 
 ### Face Security and Authorization
 - Face-based authorization gate for sensitive actions
@@ -179,6 +180,16 @@ In headless mode, after each executed action the runtime prompts:
 
 Each response is appended to logs/action_feedback.json, and feedback-adjusted
 accuracy is reflected in runtime metrics.
+
+## Voice Robustness in Noise
+
+The voice listener supports runtime controls in config/voice_control.json to improve reliability in noisy rooms:
+- ambient_calibration_s: duration used to learn ambient noise profile on startup
+- noise_reduction_enabled: toggles built-in denoising pipeline
+- noise_gate_rms: filters very low-signal audio chunks
+- recognition_max_retries and retry_backoff_s: retry speech decoding before dropping a chunk
+- adaptive_confidence_enabled and confidence_penalty_per_retry: raises acceptance threshold when decoding is unstable
+- request_error_backoff_s and max_request_error_backoff_s: exponential backoff after API request failures
 
 ---
 

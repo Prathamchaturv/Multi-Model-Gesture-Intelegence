@@ -11,6 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from collections import deque
 
 try:
     import speech_recognition as sr  # type: ignore[import-not-found]
@@ -261,6 +262,15 @@ class VoiceCommandListener:
         energy_threshold: int = 250,
         recognition_language: str = 'en-IN',
         confidence_threshold: float = 0.6,
+        ambient_calibration_s: float = 0.6,
+        noise_reduction_enabled: bool = True,
+        noise_gate_rms: float = 12.0,
+        recognition_max_retries: int = 2,
+        retry_backoff_s: float = 0.2,
+        adaptive_confidence_enabled: bool = True,
+        confidence_penalty_per_retry: float = 0.08,
+        request_error_backoff_s: float = 1.5,
+        max_request_error_backoff_s: float = 8.0,
         command_groups: dict[str, list[str]] | None = None,
         command_config_path: str | Path | None = None,
     ) -> None:
@@ -271,6 +281,15 @@ class VoiceCommandListener:
         self._energy_threshold = int(energy_threshold)
         self._recognition_language = str(recognition_language or 'en-IN')
         self._confidence_threshold = max(0.0, min(1.0, float(confidence_threshold)))
+        self._ambient_calibration_s = max(0.1, float(ambient_calibration_s))
+        self._noise_reduction_enabled = bool(noise_reduction_enabled)
+        self._noise_gate_rms = max(0.0, float(noise_gate_rms))
+        self._recognition_max_retries = max(0, int(recognition_max_retries))
+        self._retry_backoff_s = max(0.0, float(retry_backoff_s))
+        self._adaptive_confidence_enabled = bool(adaptive_confidence_enabled)
+        self._confidence_penalty_per_retry = max(0.0, float(confidence_penalty_per_retry))
+        self._request_error_backoff_s = max(0.0, float(request_error_backoff_s))
+        self._max_request_error_backoff_s = max(0.5, float(max_request_error_backoff_s))
         self._mapper = VoiceCommandMapper(
             command_groups=command_groups,
             config_path=command_config_path,
@@ -282,6 +301,11 @@ class VoiceCommandListener:
         self._ready = False
         self._last_error: str | None = None
         self._sounddevice_input_device: int | None = None
+        self._request_error_count = 0
+        self._api_backoff_until = 0.0
+        self._consecutive_decode_failures = 0
+        self._noise_rms_history: deque[float] = deque(maxlen=30)
+        self._last_noise_rms = 0.0
 
     @property
     def is_available(self) -> bool:
@@ -325,6 +349,9 @@ class VoiceCommandListener:
         recognizer = sr.Recognizer()
         recognizer.energy_threshold = self._energy_threshold
         recognizer.dynamic_energy_threshold = True
+        recognizer.pause_threshold = 0.6
+        recognizer.non_speaking_duration = 0.2
+        recognizer.phrase_threshold = 0.15
 
         try:
             if _HAS_PYAUDIO:
@@ -339,7 +366,7 @@ class VoiceCommandListener:
     def _run_with_pyaudio(self, recognizer) -> None:
         assert sr is not None
         with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source, duration=0.4)
+            recognizer.adjust_for_ambient_noise(source, duration=self._ambient_calibration_s)
             self._ready = True
             while not self._stop_event.is_set():
                 try:
@@ -388,13 +415,18 @@ class VoiceCommandListener:
             if getattr(recording, 'ndim', 1) > 1:
                 recording = recording[:, 0]
 
-            # Skip only near-zero silence to avoid dropping low-volume speech.
-            rms = float(np.sqrt(np.mean(np.square(recording.astype(np.float32)))))
-            if rms < 8.0:
+            processed = self._reduce_noise_int16(recording, sample_rate)
+            if processed is None:
                 time.sleep(self._poll_sleep_s)
                 continue
 
-            pcm = np.ascontiguousarray(recording).tobytes()
+            rms = self._rms_int16(processed)
+            self._update_noise_history(rms)
+            if rms < max(8.0, self._noise_gate_rms * 0.5):
+                time.sleep(self._poll_sleep_s)
+                continue
+
+            pcm = np.ascontiguousarray(processed).tobytes()
             audio = sr.AudioData(pcm, sample_rate, 2)
             self._consume_audio(recognizer, audio)
             time.sleep(self._poll_sleep_s)
@@ -427,6 +459,15 @@ class VoiceCommandListener:
 
     def _consume_audio(self, recognizer, audio) -> None:
         assert sr is not None
+        if time.time() < self._api_backoff_until:
+            return
+
+        if self._noise_reduction_enabled and np is not None:
+            denoised = self._denoise_audio_data(audio)
+            if denoised is None:
+                return
+            audio = denoised
+
         transcript = None
         languages: list[str] = []
         primary = self._recognition_language.strip() if self._recognition_language else ''
@@ -435,23 +476,38 @@ class VoiceCommandListener:
         if 'en-US' not in languages:
             languages.append('en-US')
 
-        for lang in languages:
-            try:
-                transcript = recognizer.recognize_google(audio, language=lang)
+        for attempt in range(self._recognition_max_retries + 1):
+            for lang in languages:
+                try:
+                    transcript = recognizer.recognize_google(audio, language=lang)
+                    self._request_error_count = 0
+                    break
+                except sr.UnknownValueError:
+                    continue
+                except sr.RequestError as exc:
+                    self._request_error_count += 1
+                    backoff = min(
+                        self._max_request_error_backoff_s,
+                        self._request_error_backoff_s * (2 ** (self._request_error_count - 1)),
+                    )
+                    self._api_backoff_until = time.time() + backoff
+                    self._last_error = f'Voice API error: {exc}'
+                    return
+            if transcript:
                 break
-            except sr.UnknownValueError:
-                continue
-            except sr.RequestError as exc:
-                self._last_error = f'Voice API error: {exc}'
-                time.sleep(self._poll_sleep_s)
-                return
+            if attempt < self._recognition_max_retries:
+                time.sleep(self._retry_backoff_s)
 
         if not transcript:
+            self._consecutive_decode_failures += 1
             return
+
+        self._consecutive_decode_failures = 0
 
         self._mapper.reload_if_needed()
         command, confidence = self._mapper.map_command(transcript)
-        if command is None or confidence < self._confidence_threshold:
+        required_threshold = self._effective_confidence_threshold()
+        if command is None or confidence < required_threshold:
             command = '__unmapped__'
 
         evt = VoiceCommandEvent(
@@ -465,6 +521,82 @@ class VoiceCommandListener:
         except queue.Full:
             _ = self._events.get_nowait()
             self._events.put_nowait(evt)
+
+    def _effective_confidence_threshold(self) -> float:
+        threshold = self._confidence_threshold
+        if not self._adaptive_confidence_enabled:
+            return threshold
+
+        noise_floor = 0.0
+        if self._noise_rms_history:
+            noise_floor = sum(self._noise_rms_history) / len(self._noise_rms_history)
+
+        # Raise required confidence under noisy conditions and repeated decode failures.
+        noise_penalty = min(0.18, max(0.0, (noise_floor - self._noise_gate_rms) / 80.0))
+        failure_penalty = min(0.2, self._consecutive_decode_failures * self._confidence_penalty_per_retry)
+        return max(0.0, min(0.95, threshold + noise_penalty + failure_penalty))
+
+    def _denoise_audio_data(self, audio):
+        if sr is None or np is None:
+            return audio
+        try:
+            sample_rate = int(getattr(audio, 'sample_rate', 16000) or 16000)
+            sample_width = int(getattr(audio, 'sample_width', 2) or 2)
+            raw = audio.get_raw_data(convert_width=2) if sample_width != 2 else audio.get_raw_data()
+            pcm = np.frombuffer(raw, dtype=np.int16)
+            filtered = self._reduce_noise_int16(pcm, sample_rate)
+            if filtered is None:
+                return None
+            return sr.AudioData(np.ascontiguousarray(filtered).tobytes(), sample_rate, 2)
+        except Exception:
+            return audio
+
+    def _reduce_noise_int16(self, pcm, sample_rate: int):
+        if np is None:
+            return pcm
+        if pcm is None or len(pcm) == 0:
+            return None
+
+        if not self._noise_reduction_enabled:
+            rms = self._rms_int16(pcm)
+            self._update_noise_history(rms)
+            if rms < self._noise_gate_rms:
+                return None
+            return np.asarray(pcm, dtype=np.int16)
+
+        x = np.asarray(pcm, dtype=np.float32)
+        x = x - float(np.mean(x))
+
+        if x.size > 1:
+            x[1:] = x[1:] - (0.97 * x[:-1])
+
+        rms = float(np.sqrt(np.mean(np.square(x))) if x.size else 0.0)
+        self._update_noise_history(rms)
+        gate = max(self._noise_gate_rms, (self._last_noise_rms * 1.35))
+        if rms < gate:
+            return None
+
+        peak = float(np.max(np.abs(x))) if x.size else 0.0
+        if peak > 0:
+            target_peak = 12000.0
+            gain = min(3.0, target_peak / peak)
+            x = x * gain
+
+        x = np.clip(x, -32768, 32767)
+        return x.astype(np.int16)
+
+    @staticmethod
+    def _rms_int16(pcm) -> float:
+        if np is None:
+            return 0.0
+        arr = np.asarray(pcm, dtype=np.float32)
+        if arr.size == 0:
+            return 0.0
+        return float(np.sqrt(np.mean(np.square(arr))))
+
+    def _update_noise_history(self, rms: float) -> None:
+        self._last_noise_rms = float(max(0.0, rms))
+        self._noise_rms_history.append(self._last_noise_rms)
 
 
 def normalize_voice_command(transcript: str) -> str | None:

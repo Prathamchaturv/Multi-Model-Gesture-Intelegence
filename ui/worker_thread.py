@@ -62,6 +62,7 @@ from engine.unified_pipeline     import (
     ModeManager,
     UnifiedDecisionPipeline,
 )
+from engine.context_aware_gesture import get_context, handle_gesture
 from utils.fps_counter           import FPSCounter
 from utils.config                import Config
 from utils.settings_loader       import RuntimeSettingsLoader
@@ -314,6 +315,7 @@ def _draw_overlay(
     face_status: str | None = None,
     face_authorized: bool | None = None,
     debug_text: str | None = None,
+    context_name: str | None = None,
 ) -> None:
     """Annotate frame in-place with gesture/mode/state HUD."""
     h, w = frame.shape[:2]
@@ -334,6 +336,19 @@ def _draw_overlay(
     mc = _MODE_COLOURS.get(mode, _ACCENT)
     cv2.putText(frame, mode.upper(), (w // 2 - 70, 36),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, mc, 2)
+
+    if context_name:
+        context_label = f'CTX: {context_name.upper()}'
+        cv2.putText(
+            frame,
+            context_label,
+            (w // 2 - 70, 54),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            _WHITE,
+            1,
+            cv2.LINE_AA,
+        )
 
     # Compact stats panel on the top-right (cheap draw ops, no heavy formatting).
     panel_w, panel_h = 195, 74
@@ -715,6 +730,9 @@ class WorkerThread(QThread):
             scroll_interval_s = 0.05  # Scroll every 50ms for smooth, controlled rate
             scroll_amount = 120  # Absolute pixels per scroll event
             last_scroll_gesture: str | None = None  # Track previous gesture to detect changes
+            current_context = 'system'
+            last_context_refresh_ts = 0.0
+            context_refresh_interval_s = 0.25
 
 
 
@@ -1381,6 +1399,37 @@ class WorkerThread(QThread):
                 # not just activation gesture latched.
                 state.set_system_active(system_is_active and not bool(runtime_locked_reason))
 
+                now_context = time.time()
+                if (now_context - last_context_refresh_ts) >= context_refresh_interval_s:
+                    current_context = get_context()
+                    last_context_refresh_ts = now_context
+                state.set_context(current_context)
+
+                context_name = None
+                context_action = None
+                if (
+                    effective_gesture
+                    and not use_cached_gesture
+                    and not is_mode_switch_gesture
+                ):
+                    context_name = current_context
+                    context_action = handle_gesture(effective_gesture, context_name)
+
+                if context_action and should_execute:
+                    context_event = InputEventNormalizer.from_gesture(
+                        gesture=effective_gesture,
+                        confidence=effective_confidence,
+                    )
+                    pending_events.append(
+                        (
+                            context_event,
+                            context_action,
+                            f'{context_name.title()} Context' if context_name else 'Context',
+                            time.perf_counter(),
+                        )
+                    )
+                    effective_gesture = None
+
                 for event, forced_action, source_label, event_start_perf in pending_events:
                     if forced_action is not None:
                         allowed, blocked_reason = runtime_controller.can_execute_action(
@@ -1595,6 +1644,7 @@ class WorkerThread(QThread):
                     face_status=face_status if mode_manager.current_mode == 'System Mode' else None,
                     face_authorized=face_authorized if mode_manager.current_mode == 'System Mode' else None,
                     debug_text=debug_text,
+                    context_name=current_context,
                 )
 
                 self.frame_ready.emit(_frame_to_qimage(frame))

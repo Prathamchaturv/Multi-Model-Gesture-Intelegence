@@ -120,7 +120,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QProgressBar, QScrollArea,
     QSizePolicy, QSpacerItem, QMainWindow, QMessageBox,
     QComboBox, QStackedWidget, QLineEdit, QListWidget, QListWidgetItem,
-    QCheckBox, QSlider,
+    QCheckBox, QSlider, QTextEdit,
 )
 
 from ui.shared_state  import SharedState
@@ -141,6 +141,7 @@ from core.adaptive_gesture_learning import (
 
 _GESTURE_MAP_PATH = Path(__file__).parent.parent / 'config' / 'gesture_map.json'
 _FACE_SECURITY_PATH = Path(__file__).parent.parent / 'config' / 'face_security.json'
+_CONTEXT_ROUTING_PATH = Path(__file__).parent.parent / 'config' / 'context_routing.json'
 
 # Human-readable labels for action keys (mirrors ActionExecutor._LABELS)
 _ACTION_DISPLAY_LABELS: dict[str, str] = {
@@ -205,6 +206,52 @@ def _load_face_security_config() -> dict:
 def _save_face_security_config(data: dict) -> None:
     _FACE_SECURITY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(_FACE_SECURITY_PATH, 'w', encoding='utf-8') as fh:
+        json.dump(data, fh, indent=2)
+
+
+def _load_context_routing_config() -> dict:
+    defaults = {
+        'browser_keywords': [
+            'chrome',
+            'msedge',
+            'firefox',
+            'brave',
+            'opera',
+            'vivaldi',
+            'arc',
+            'browser',
+        ],
+        'media_keywords': [
+            'vlc',
+            'spotify',
+            'music',
+            'itunes',
+            'potplayer',
+            'wmplayer',
+            'youtube',
+            'netflix',
+            'prime video',
+            'disney',
+        ],
+    }
+    try:
+        with open(_CONTEXT_ROUTING_PATH, 'r', encoding='utf-8') as fh:
+            raw = json.load(fh)
+        if isinstance(raw, dict):
+            browser = raw.get('browser_keywords')
+            media = raw.get('media_keywords')
+            if isinstance(browser, list):
+                defaults['browser_keywords'] = [str(item) for item in browser if str(item).strip()]
+            if isinstance(media, list):
+                defaults['media_keywords'] = [str(item) for item in media if str(item).strip()]
+    except Exception:
+        pass
+    return defaults
+
+
+def _save_context_routing_config(data: dict) -> None:
+    _CONTEXT_ROUTING_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_CONTEXT_ROUTING_PATH, 'w', encoding='utf-8') as fh:
         json.dump(data, fh, indent=2)
 
 
@@ -744,6 +791,7 @@ class VisionPanel(QWidget):
         self._state = state
         self._current_mode = 'App Mode'
         self._current_user_state = 'open'
+        self._voice_history_last_text = ''
         self._build_ui()
         self._connect_state()
 
@@ -890,10 +938,78 @@ class VisionPanel(QWidget):
         )
         self._gesture_btn.clicked.connect(self._toggle_gestures)
 
+        self._mic_btn = QPushButton('Mic: ON')
+        self._mic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mic_btn.setStyleSheet(
+            f'QPushButton {{ background: rgba(96,165,250,0.12); color: {MODE_MEDIA}; border: 1px solid {MODE_MEDIA}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+            f'QPushButton:hover {{ background: rgba(96,165,250,0.24); }}'
+        )
+        self._mic_btn.clicked.connect(self._toggle_voice)
+
         qc_lay.addWidget(self._face_lock_btn)
         qc_lay.addWidget(self._reset_tracking_btn)
         qc_lay.addWidget(self._gesture_btn)
+        qc_lay.addWidget(self._mic_btn)
         root.addWidget(quick_controls)
+
+        voice_card = QFrame()
+        voice_card.setStyleSheet(
+            f'QFrame {{ background: rgba(18, 26, 45, 0.84); border: 1px solid rgba(123,233,255,0.14); border-radius: 12px; }}'
+        )
+        voice_lay = QVBoxLayout(voice_card)
+        voice_lay.setContentsMargins(12, 10, 12, 10)
+        voice_lay.setSpacing(6)
+
+        voice_title = QLabel('VOICE COMMAND INTERFACE')
+        voice_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 1px; background: transparent; border: none;'
+        )
+        voice_lay.addWidget(voice_title)
+
+        self._voice_status_lbl = QLabel('Listening...')
+        self._voice_status_lbl.setStyleSheet(
+            f'color: {MODE_MEDIA}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+        )
+        voice_lay.addWidget(self._voice_status_lbl)
+
+        self._voice_textbox = QTextEdit()
+        self._voice_textbox.setReadOnly(True)
+        self._voice_textbox.setPlaceholderText('Recognized speech will appear here...')
+        self._voice_textbox.setMaximumHeight(72)
+        self._voice_textbox.setStyleSheet(f"""
+            QTextEdit {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 8px; padding: 6px; font-size: 12px;
+            }}
+        """)
+        voice_lay.addWidget(self._voice_textbox)
+
+        history_title = QLabel('Recent Voice Commands')
+        history_title.setStyleSheet(
+            f'color: {TEXT_SEC}; font-size: 10px; font-weight: 600; letter-spacing: 1px; background: transparent; border: none;'
+        )
+        voice_lay.addWidget(history_title)
+
+        self._voice_history_list = QListWidget()
+        self._voice_history_list.setMaximumHeight(116)
+        self._voice_history_list.setStyleSheet(f"""
+            QListWidget {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 8px; padding: 2px; font-size: 11px;
+            }}
+            QListWidget::item {{
+                padding: 4px 6px;
+                border-bottom: 1px solid {BORDER};
+            }}
+            QListWidget::item:selected {{
+                background: rgba(56,221,248,0.18);
+                color: {TEXT_PRI};
+            }}
+        """)
+        self._voice_history_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        voice_lay.addWidget(self._voice_history_list)
+
+        root.addWidget(voice_card)
 
         # ── Mode-switch stability bar ─────────────────────────────────
         stab_lbl = QLabel('MODE SWITCH HOLD')
@@ -1020,6 +1136,7 @@ class VisionPanel(QWidget):
         s.runtime_state_changed.connect(self._on_runtime_state_changed)
         s.face_security_enabled_changed.connect(self._on_face_lock_state)
         s.gesture_control_enabled_changed.connect(self._on_gesture_control_state)
+        s.voice_listener_enabled_changed.connect(self._on_voice_listener_state)
 
     @pyqtSlot(QImage)
     def update_frame(self, image: QImage) -> None:
@@ -1092,6 +1209,33 @@ class VisionPanel(QWidget):
         text = command_text if command_text else '—'
         self._voice_command_val.setText(self._compact_text(text, 18))
         self._voice_command_val.setToolTip(text)
+
+        if 'listening' in text.lower() or 'mic active' in text.lower():
+            self._voice_status_lbl.setText('Listening...')
+            self._voice_status_lbl.setStyleSheet(
+                f'color: {MODE_MEDIA}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+            )
+        elif 'off' in text.lower() or 'unavailable' in text.lower() or 'error' in text.lower():
+            self._voice_status_lbl.setText('Mic Idle')
+            self._voice_status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+            )
+        else:
+            self._voice_status_lbl.setText('Command Recognized')
+            self._voice_status_lbl.setStyleSheet(
+                f'color: {ACTIVE}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+            )
+
+        self._voice_textbox.setPlainText(text)
+
+        normalized = text.strip().lower()
+        if normalized and normalized != self._voice_history_last_text:
+            ts = time.strftime('%H:%M:%S')
+            entry = QListWidgetItem(f'[{ts}] {text}')
+            self._voice_history_list.insertItem(0, entry)
+            while self._voice_history_list.count() > 10:
+                self._voice_history_list.takeItem(self._voice_history_list.count() - 1)
+            self._voice_history_last_text = normalized
 
     @pyqtSlot(bool, str)
     def _on_face_auth_changed(self, authorized: bool, status_text: str) -> None:
@@ -1217,6 +1361,10 @@ class VisionPanel(QWidget):
         enabled = not self._state.gesture_control_enabled
         self._state.set_gesture_control_enabled(enabled)
 
+    def _toggle_voice(self) -> None:
+        enabled = not self._state.voice_listener_enabled
+        self._state.set_voice_listener_enabled(enabled)
+
     def _reset_tracking_state(self) -> None:
         self._state.set_mode_stability(0.0)
         self._state.emit_log(time.strftime('%H:%M:%S'), 'SYSTEM', 'Tracking state reset from dashboard control')
@@ -1247,6 +1395,28 @@ class VisionPanel(QWidget):
             self._gesture_btn.setStyleSheet(
                 f'QPushButton {{ background: rgba(255,107,135,0.12); color: {INACTIVE}; border: 1px solid {INACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
                 f'QPushButton:hover {{ background: rgba(255,107,135,0.24); }}'
+            )
+
+    @pyqtSlot(bool)
+    def _on_voice_listener_state(self, enabled: bool) -> None:
+        self._mic_btn.setText('Mic: ON' if enabled else 'Mic: OFF')
+        if enabled:
+            self._mic_btn.setStyleSheet(
+                f'QPushButton {{ background: rgba(96,165,250,0.12); color: {MODE_MEDIA}; border: 1px solid {MODE_MEDIA}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+                f'QPushButton:hover {{ background: rgba(96,165,250,0.24); }}'
+            )
+            self._voice_status_lbl.setText('Listening...')
+            self._voice_status_lbl.setStyleSheet(
+                f'color: {MODE_MEDIA}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+            )
+        else:
+            self._mic_btn.setStyleSheet(
+                f'QPushButton {{ background: rgba(255,107,135,0.12); color: {INACTIVE}; border: 1px solid {INACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
+                f'QPushButton:hover {{ background: rgba(255,107,135,0.24); }}'
+            )
+            self._voice_status_lbl.setText('Mic Idle')
+            self._voice_status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
             )
 
 
@@ -2806,6 +2976,63 @@ class SettingsPanel(QWidget):
 
         root.addWidget(detection_card)
 
+        context_card = QFrame()
+        context_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        context_lay = QVBoxLayout(context_card)
+        context_lay.setContentsMargins(16, 14, 16, 16)
+        context_lay.setSpacing(8)
+
+        context_title = QLabel('CONTEXT ROUTING')
+        context_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        context_lay.addWidget(context_title)
+        context_lay.addWidget(_divider())
+
+        browser_lbl = QLabel('Browser Keywords (comma-separated)')
+        browser_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        context_lay.addWidget(browser_lbl)
+        self._context_browser_input = QLineEdit()
+        self._context_browser_input.setPlaceholderText('chrome, edge, firefox, brave')
+        self._context_browser_input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 6px; padding: 6px 8px; font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {ACCENT}; }}
+        """)
+        context_lay.addWidget(self._context_browser_input)
+
+        media_lbl = QLabel('Media Keywords (comma-separated)')
+        media_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
+        context_lay.addWidget(media_lbl)
+        self._context_media_input = QLineEdit()
+        self._context_media_input.setPlaceholderText('youtube, vlc, spotify, netflix')
+        self._context_media_input.setStyleSheet(self._context_browser_input.styleSheet())
+        context_lay.addWidget(self._context_media_input)
+
+        self._save_context_btn = QPushButton('Save Context Keywords')
+        self._save_context_btn.setFixedHeight(32)
+        self._save_context_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._save_context_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: rgba(56,221,248,0.12); color: {ACCENT}; border: 1px solid {ACCENT};
+                border-radius: 8px; font-size: 12px; font-weight: 700;
+            }}
+            QPushButton:hover {{ background: rgba(56,221,248,0.24); }}
+        """)
+        self._save_context_btn.clicked.connect(self._on_save_context_keywords)
+        context_lay.addWidget(self._save_context_btn)
+
+        self._context_status_lbl = QLabel('Edit keywords and click Save Context Keywords.')
+        self._context_status_lbl.setWordWrap(True)
+        self._context_status_lbl.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px; background: transparent; border: none;')
+        context_lay.addWidget(self._context_status_lbl)
+
+        root.addWidget(context_card)
+
         calib_card = QFrame()
         calib_card.setStyleSheet(
             f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
@@ -3004,6 +3231,7 @@ class SettingsPanel(QWidget):
 
     def _sync_ui_from_config(self) -> None:
         self._cfg = _load_face_security_config()
+        context_cfg = _load_context_routing_config()
         self._calibration.load()
         self._face_toggle.blockSignals(True)
         self._face_toggle.setChecked(bool(self._cfg.get('enabled', True)))
@@ -3065,6 +3293,53 @@ class SettingsPanel(QWidget):
         
         self._confidence_slider.blockSignals(False)
         self._frames_slider.blockSignals(False)
+
+        self._context_browser_input.blockSignals(True)
+        self._context_media_input.blockSignals(True)
+        self._context_browser_input.setText(', '.join(context_cfg.get('browser_keywords', [])))
+        self._context_media_input.setText(', '.join(context_cfg.get('media_keywords', [])))
+        self._context_browser_input.blockSignals(False)
+        self._context_media_input.blockSignals(False)
+
+    @staticmethod
+    def _parse_keywords(raw: str) -> list[str]:
+        tokens = []
+        seen = set()
+        for item in raw.split(','):
+            keyword = item.strip().lower()
+            if not keyword or keyword in seen:
+                continue
+            seen.add(keyword)
+            tokens.append(keyword)
+        return tokens
+
+    def _on_save_context_keywords(self) -> None:
+        browser_keywords = self._parse_keywords(self._context_browser_input.text())
+        media_keywords = self._parse_keywords(self._context_media_input.text())
+
+        if not browser_keywords or not media_keywords:
+            self._context_status_lbl.setText('Both browser and media keyword lists must contain at least one item.')
+            self._context_status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
+            return
+
+        try:
+            _save_context_routing_config({
+                'browser_keywords': browser_keywords,
+                'media_keywords': media_keywords,
+            })
+            self._context_browser_input.setText(', '.join(browser_keywords))
+            self._context_media_input.setText(', '.join(media_keywords))
+            self._context_status_lbl.setText('Saved. Context detection will use new keywords immediately.')
+            self._context_status_lbl.setStyleSheet(
+                f'color: {ACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
+        except Exception as exc:
+            self._context_status_lbl.setText(f'Failed to save context keywords: {exc}')
+            self._context_status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 600; background: transparent; border: none;'
+            )
 
     def _subscribe_to_config_changes(self) -> None:
         """Subscribe to ConfigManager changes to update UI when config changes externally."""

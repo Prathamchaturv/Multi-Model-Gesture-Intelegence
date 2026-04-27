@@ -17,6 +17,10 @@ class MetricsSnapshot:
     correct_predictions: int
     incorrect_predictions: int
     accuracy_pct: float
+    feedback_total: int
+    feedback_correct: int
+    feedback_incorrect: int
+    feedback_accuracy_pct: float
     gesture_accuracy_pct: float
     false_activation_rate_pct: float
     avg_response_latency_ms: float
@@ -51,6 +55,9 @@ class MetricsManager:
         self._incorrect_predictions = 0
         self._activation_attempts = 0
         self._false_activations = 0
+        self._feedback_total = 0
+        self._feedback_correct = 0
+        self._feedback_incorrect = 0
         self._latencies = deque(maxlen=300)
         self._mode_switch_timestamps = deque(maxlen=240)
         self._last_flush_ts = 0.0
@@ -107,9 +114,19 @@ class MetricsManager:
 
     def calculate_accuracy(self) -> float:
         """Return prediction accuracy as percentage in [0, 100]."""
+        if self._feedback_total > 0:
+            return (self._feedback_correct / self._feedback_total) * 100.0
         if self._total_gestures_detected <= 0:
             return 0.0
         return (self._correct_predictions / self._total_gestures_detected) * 100.0
+
+    def record_feedback_result(self, is_correct: bool) -> None:
+        """Update feedback counters used for user-validated accuracy."""
+        self._feedback_total += 1
+        if is_correct:
+            self._feedback_correct += 1
+        else:
+            self._feedback_incorrect += 1
 
     def record_activation_attempt(self, succeeded: bool) -> None:
         self._activation_attempts += 1
@@ -141,12 +158,19 @@ class MetricsManager:
             avg_latency = sum(self._latencies) / len(self._latencies)
 
         accuracy = self.calculate_accuracy()
+        feedback_accuracy = 0.0
+        if self._feedback_total > 0:
+            feedback_accuracy = (self._feedback_correct / self._feedback_total) * 100.0
 
         return MetricsSnapshot(
             total_gestures_detected=self._total_gestures_detected,
             correct_predictions=self._correct_predictions,
             incorrect_predictions=self._incorrect_predictions,
             accuracy_pct=round(accuracy, 2),
+            feedback_total=self._feedback_total,
+            feedback_correct=self._feedback_correct,
+            feedback_incorrect=self._feedback_incorrect,
+            feedback_accuracy_pct=round(feedback_accuracy, 2),
             gesture_accuracy_pct=round(gesture_accuracy, 2),
             false_activation_rate_pct=round(false_activation_rate, 2),
             avg_response_latency_ms=round(avg_latency, 2),
@@ -165,6 +189,10 @@ class MetricsManager:
             'correct_predictions': snap.correct_predictions,
             'incorrect_predictions': snap.incorrect_predictions,
             'accuracy_pct': snap.accuracy_pct,
+            'feedback_total': snap.feedback_total,
+            'feedback_correct': snap.feedback_correct,
+            'feedback_incorrect': snap.feedback_incorrect,
+            'feedback_accuracy_pct': snap.feedback_accuracy_pct,
             'gesture_accuracy_pct': snap.gesture_accuracy_pct,
             'false_activation_rate_pct': snap.false_activation_rate_pct,
             'avg_response_latency_ms': snap.avg_response_latency_ms,
@@ -187,6 +215,8 @@ class MetricsManager:
             f"Correct Predictions:{snap.correct_predictions}",
             f"Incorrect Predictions:{snap.incorrect_predictions}",
             f"Accuracy:           {snap.accuracy_pct:.2f}%",
+            f"Feedback Count:     {snap.feedback_total}",
+            f"Feedback Accuracy:  {snap.feedback_accuracy_pct:.2f}%",
             f"False Activations:  {snap.false_activation_rate_pct:.2f}%",
             f"Avg Latency:        {snap.avg_response_latency_ms:.2f} ms",
             f"Mode Switches/min:  {snap.mode_switches_per_min:.0f}",

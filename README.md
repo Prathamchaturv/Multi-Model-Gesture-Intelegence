@@ -145,12 +145,14 @@ It provides:
 - Total gestures detected
 - Correct vs incorrect predictions
 - Accuracy percentage
+- User feedback collection (correct/incorrect after executed actions)
 - False activation rate and response latency summaries
 - Persistent log files for offline analysis
 
 Default log outputs:
 - logs/metrics_report.jsonl (periodic summary snapshots)
 - logs/gesture_prediction_events.jsonl (per-prediction event log)
+- logs/action_feedback.json (user feedback history)
 
 CSV event logging is also supported by constructing MetricsManager with log_format='csv'.
 
@@ -167,6 +169,16 @@ print(f"Accuracy: {metrics.calculate_accuracy():.2f}%")
 print(metrics.dashboard_text())
 metrics.flush_report(force=True)
 ```
+
+### Feedback Loop (Headless Mode)
+
+In headless mode, after each executed action the runtime prompts:
+- c = correct
+- i = incorrect
+- s = skip
+
+Each response is appended to logs/action_feedback.json, and feedback-adjusted
+accuracy is reflected in runtime metrics.
 
 ---
 

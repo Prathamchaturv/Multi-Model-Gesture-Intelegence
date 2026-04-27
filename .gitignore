@@ -27,6 +27,7 @@ logs/*.log*
 logs/metrics_report.jsonl
 logs/gesture_prediction_events.jsonl
 logs/gesture_prediction_events.csv
+logs/action_feedback.json
 
 # Local face-auth runtime artifacts
 config/authorized_face.jpg

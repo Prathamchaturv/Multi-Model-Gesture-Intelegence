@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.calibration import CalibrationManager  # noqa: E402
+from engine.feedback_manager import FeedbackManager  # noqa: E402
 from engine.metrics_manager import MetricsManager  # noqa: E402
 
 
@@ -157,3 +158,43 @@ def test_metrics_event_log_csv_and_dashboard_text() -> None:
         assert 'Gesture Performance Dashboard' in dashboard
         assert 'Total Gestures:' in dashboard
         assert 'Accuracy:' in dashboard
+
+
+def test_metrics_feedback_overrides_accuracy_when_available() -> None:
+    metrics = MetricsManager()
+    metrics.record_prediction('Open Palm', 'Open Palm')
+    metrics.record_prediction('Fist', 'Open Palm')
+    assert abs(metrics.calculate_accuracy() - 50.0) < 1e-9
+
+    metrics.record_feedback_result(is_correct=True)
+    metrics.record_feedback_result(is_correct=True)
+    metrics.record_feedback_result(is_correct=False)
+
+    snap = metrics.snapshot()
+    assert snap.feedback_total == 3
+    assert snap.feedback_correct == 2
+    assert snap.feedback_incorrect == 1
+    assert abs(snap.feedback_accuracy_pct - 66.67) < 1e-2
+    assert abs(snap.accuracy_pct - 66.67) < 1e-2
+
+
+def test_feedback_manager_persists_json_and_updates_metrics() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        metrics = MetricsManager()
+        feedback_file = Path(td) / 'feedback.json'
+        manager = FeedbackManager(metrics=metrics, feedback_path=feedback_file)
+
+        manager.record_feedback(action='open_brave', is_correct=True, source='headless')
+        manager.record_feedback(action='close_window', is_correct=False, source='headless')
+
+        assert feedback_file.exists()
+        payload = json.loads(feedback_file.read_text(encoding='utf-8'))
+        assert isinstance(payload, list)
+        assert len(payload) == 2
+        assert payload[0]['action'] == 'open_brave'
+        assert payload[1]['is_correct'] is False
+
+        snap = metrics.snapshot()
+        assert snap.feedback_total == 2
+        assert snap.feedback_correct == 1
+        assert snap.feedback_incorrect == 1

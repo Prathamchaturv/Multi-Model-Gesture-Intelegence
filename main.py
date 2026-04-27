@@ -46,6 +46,8 @@ def run_headless(max_frames: int = 0) -> None:
     from core.decision_engine      import DecisionEngine
     from engine.context_aware_gesture import get_context, handle_gesture
     from execution.cursor_control  import ActionExecutor
+    from engine.feedback_manager    import FeedbackManager
+    from engine.metrics_manager     import MetricsManager
     from engine.unified_pipeline   import InputEventNormalizer, ModeManager, UnifiedDecisionPipeline
     from utils.fps_counter         import FPSCounter
     from utils.config              import Config
@@ -116,6 +118,8 @@ def run_headless(max_frames: int = 0) -> None:
             mode_manager=mode_manager,
             face_security=face_security,
         )
+        metrics = MetricsManager()
+        feedback_manager = FeedbackManager(metrics=metrics)
         fps_counter        = FPSCounter()
 
         print('[Ready] Show Open Palm 2 s to activate. Keyboard: s=start/resume, p=pause, q/ESC=quit.\n')
@@ -191,6 +195,12 @@ def run_headless(max_frames: int = 0) -> None:
 
             if action:
                 print(f'  Action: {action}')
+                feedback = feedback_manager.ask_and_record(action=action, source='headless')
+                if feedback is None:
+                    print('  Feedback: skipped')
+                else:
+                    status = 'correct' if feedback.is_correct else 'incorrect'
+                    print(f'  Feedback: {status} | Accuracy: {metrics.calculate_accuracy():.2f}%')
 
             if processing_enabled:
                 processed_frames += 1
@@ -226,6 +236,11 @@ def run_headless(max_frames: int = 0) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        try:
+            print('\n' + metrics.dashboard_text())
+            metrics.flush_report(force=True)
+        except Exception:
+            pass
         if camera_obj:
             camera_obj.release()
         if hand_tracker:

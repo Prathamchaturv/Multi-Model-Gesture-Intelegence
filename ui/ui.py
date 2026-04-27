@@ -1737,12 +1737,14 @@ class PerformanceCard(QFrame):
         correct = int(float(payload.get('correct_predictions', 0.0)))
         incorrect = int(float(payload.get('incorrect_predictions', 0.0)))
         acc = float(payload.get('accuracy_pct', payload.get('gesture_accuracy_pct', 0.0)))
+        feedback_acc = float(payload.get('feedback_accuracy_pct', acc))
         false_rate = float(payload.get('false_activation_rate_pct', 0.0))
         mode_rate = float(payload.get('mode_switches_per_min', 0.0))
         self._metrics_lbl.setText(
             (
                 f'Total: {total}   Correct: {correct}   Incorrect: {incorrect}   '
-                f'Acc: {acc:.1f}%   False Activations: {false_rate:.1f}%   Mode/min: {mode_rate:.0f}'
+                f'Acc: {acc:.1f}%   Feedback Acc: {feedback_acc:.1f}%   '
+                f'False Activations: {false_rate:.1f}%   Mode/min: {mode_rate:.0f}'
             )
         )
 

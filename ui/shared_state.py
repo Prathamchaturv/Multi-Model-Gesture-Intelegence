@@ -97,6 +97,10 @@ class SharedState(QObject):
         self._voice_command    = ''
         self._cursor_sensitivity = 1.0
         self._metrics = {
+            'total_gestures_detected': 0.0,
+            'correct_predictions': 0.0,
+            'incorrect_predictions': 0.0,
+            'accuracy_pct': 0.0,
             'gesture_accuracy_pct': 0.0,
             'false_activation_rate_pct': 0.0,
             'avg_response_latency_ms': 0.0,
@@ -357,6 +361,10 @@ class SharedState(QObject):
     def set_metrics(self, metrics: dict) -> None:
         """Broadcast latest lightweight performance metrics."""
         payload = {
+            'total_gestures_detected': float(metrics.get('total_gestures_detected', 0.0)),
+            'correct_predictions': float(metrics.get('correct_predictions', 0.0)),
+            'incorrect_predictions': float(metrics.get('incorrect_predictions', 0.0)),
+            'accuracy_pct': float(metrics.get('accuracy_pct', 0.0)),
             'gesture_accuracy_pct': float(metrics.get('gesture_accuracy_pct', 0.0)),
             'false_activation_rate_pct': float(metrics.get('false_activation_rate_pct', 0.0)),
             'avg_response_latency_ms': float(metrics.get('avg_response_latency_ms', 0.0)),

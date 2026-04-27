@@ -22,6 +22,8 @@ This multimodal approach improves reliability, usability, and safety in dynamic 
 - Mode-aware gesture-to-action mapping
 - Activation and cooldown safeguards to avoid accidental triggers
 - Stable detection pipeline with confidence-based filtering
+- Runtime gesture metrics: total detections, correct/incorrect predictions, and accuracy
+- JSONL/CSV prediction event logging with rolling dashboard summaries
 
 ### Voice Command Interface
 - Live microphone listening pipeline
@@ -134,6 +136,37 @@ Suggested documentation captions:
 - Safety-first execution strategy with confidence and authorization guards
 - Reusable multimodal pipeline suitable for research and product prototyping
 - Strong extensibility for future AI-assisted interaction capabilities
+
+## Metrics Tracking
+
+The runtime pipeline includes a lightweight metrics manager in engine/metrics_manager.py.
+
+It provides:
+- Total gestures detected
+- Correct vs incorrect predictions
+- Accuracy percentage
+- False activation rate and response latency summaries
+- Persistent log files for offline analysis
+
+Default log outputs:
+- logs/metrics_report.jsonl (periodic summary snapshots)
+- logs/gesture_prediction_events.jsonl (per-prediction event log)
+
+CSV event logging is also supported by constructing MetricsManager with log_format='csv'.
+
+Example:
+
+```python
+from engine.metrics_manager import MetricsManager
+
+metrics = MetricsManager(log_format='csv')
+metrics.record_prediction('Open Palm', 'Open Palm', confidence=0.93)
+metrics.record_prediction('Fist', 'Open Palm', confidence=0.61)
+
+print(f"Accuracy: {metrics.calculate_accuracy():.2f}%")
+print(metrics.dashboard_text())
+metrics.flush_report(force=True)
+```
 
 ---
 

@@ -1126,7 +1126,11 @@ class WorkerThread(QThread):
                                     last_invalid_log = now
                             else:
                                 gesture, stable_state = gesture_filter.update(raw_gesture, hand_present=True)
-                                metrics.record_gesture_event(confirmed=(stable_state == 'stable' and gesture is not None))
+                                metrics.record_gesture_event(
+                                    confirmed=(stable_state == 'stable' and gesture is not None),
+                                    gesture=raw_gesture,
+                                    confidence=confidence,
+                                )
                                 if stable_state == 'stable' and gesture is not None:
                                     uncertainty_streak = 0
                                     ui_gesture_text = gesture
@@ -1613,6 +1617,10 @@ class WorkerThread(QThread):
                     log_frame_latency(frame_index, latency_ms, fps_counter.fps, mode_manager.current_mode)
                 snap = metrics.flush_report()
                 state.set_metrics({
+                    'total_gestures_detected': snap.total_gestures_detected,
+                    'correct_predictions': snap.correct_predictions,
+                    'incorrect_predictions': snap.incorrect_predictions,
+                    'accuracy_pct': snap.accuracy_pct,
                     'gesture_accuracy_pct': snap.gesture_accuracy_pct,
                     'false_activation_rate_pct': snap.false_activation_rate_pct,
                     'avg_response_latency_ms': snap.avg_response_latency_ms,
@@ -1626,8 +1634,11 @@ class WorkerThread(QThread):
                 if profile.debug_overlay_enabled:
                     debug_text = (
                         f'Debug | Sens:{state.cursor_sensitivity:.2f} '
+                        f'T:{snap.total_gestures_detected} '
+                        f'C:{snap.correct_predictions} '
+                        f'I:{snap.incorrect_predictions} '
                         f'Scale:{current_processing_scale:.2f} '
-                        f'Acc:{snap.gesture_accuracy_pct:.1f}% '
+                        f'Acc:{snap.accuracy_pct:.1f}% '
                         f'FalseAct:{snap.false_activation_rate_pct:.1f}% '
                         f'AvgLat:{snap.avg_response_latency_ms:.1f}ms'
                     )

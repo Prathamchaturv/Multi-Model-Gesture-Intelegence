@@ -1703,7 +1703,7 @@ class PerformanceCard(QFrame):
         self._cursor_lbl.setStyleSheet(f'color: {TEXT_SEC}; font-size: 11px; background: transparent; border: none;')
         lay.addWidget(self._cursor_lbl)
 
-        self._metrics_lbl = QLabel('Acc: 0.0%   False Activations: 0.0%   Mode/min: 0')
+        self._metrics_lbl = QLabel('Total: 0   Correct: 0   Incorrect: 0   Acc: 0.0%')
         self._metrics_lbl.setWordWrap(True)
         self._metrics_lbl.setStyleSheet(f'color: {TEXT_HINT}; font-size: 11px; background: transparent; border: none;')
         lay.addWidget(self._metrics_lbl)
@@ -1733,11 +1733,17 @@ class PerformanceCard(QFrame):
 
     @pyqtSlot(dict)
     def _on_metrics(self, payload: dict) -> None:
-        acc = float(payload.get('gesture_accuracy_pct', 0.0))
+        total = int(float(payload.get('total_gestures_detected', 0.0)))
+        correct = int(float(payload.get('correct_predictions', 0.0)))
+        incorrect = int(float(payload.get('incorrect_predictions', 0.0)))
+        acc = float(payload.get('accuracy_pct', payload.get('gesture_accuracy_pct', 0.0)))
         false_rate = float(payload.get('false_activation_rate_pct', 0.0))
         mode_rate = float(payload.get('mode_switches_per_min', 0.0))
         self._metrics_lbl.setText(
-            f'Acc: {acc:.1f}%   False Activations: {false_rate:.1f}%   Mode/min: {mode_rate:.0f}'
+            (
+                f'Total: {total}   Correct: {correct}   Incorrect: {incorrect}   '
+                f'Acc: {acc:.1f}%   False Activations: {false_rate:.1f}%   Mode/min: {mode_rate:.0f}'
+            )
         )
 
 

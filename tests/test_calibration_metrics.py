@@ -103,6 +103,10 @@ def test_metrics_snapshot_computation() -> None:
     metrics.record_mode_switch(timestamp=100.0)
 
     snap = metrics.snapshot()
+    assert snap.total_gestures_detected == 2
+    assert snap.correct_predictions == 1
+    assert snap.incorrect_predictions == 1
+    assert abs(snap.accuracy_pct - 50.0) < 1e-9
     assert abs(snap.gesture_accuracy_pct - 50.0) < 1e-9
     assert abs(snap.false_activation_rate_pct - 50.0) < 1e-9
     assert abs(snap.avg_response_latency_ms - 20.0) < 1e-9
@@ -119,5 +123,37 @@ def test_metrics_flush_report_writes_json_line() -> None:
 
         line = out.read_text(encoding='utf-8').strip().splitlines()[-1]
         payload = json.loads(line)
+        assert 'total_gestures_detected' in payload
+        assert 'accuracy_pct' in payload
         assert 'gesture_accuracy_pct' in payload
         assert 'avg_response_latency_ms' in payload
+
+
+def test_metrics_record_prediction_and_accuracy() -> None:
+    metrics = MetricsManager()
+    assert metrics.record_prediction('Open Palm', 'Open Palm', confidence=0.91)
+    assert not metrics.record_prediction('Fist', 'Open Palm', confidence=0.76)
+
+    assert abs(metrics.calculate_accuracy() - 50.0) < 1e-9
+    snap = metrics.snapshot()
+    assert snap.total_gestures_detected == 2
+    assert snap.correct_predictions == 1
+    assert snap.incorrect_predictions == 1
+
+
+def test_metrics_event_log_csv_and_dashboard_text() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        events = Path(td) / 'events.csv'
+        report = Path(td) / 'report.jsonl'
+        metrics = MetricsManager(report_path=report, event_log_path=events, log_format='csv')
+        metrics.record_prediction('Two Fingers', 'Two Fingers', confidence=0.88)
+        metrics.record_prediction('Three Fingers', 'Four Fingers', confidence=0.52)
+
+        csv_lines = events.read_text(encoding='utf-8').strip().splitlines()
+        assert csv_lines[0].startswith('timestamp,predicted_gesture,expected_gesture,is_correct')
+        assert len(csv_lines) == 3
+
+        dashboard = metrics.dashboard_text()
+        assert 'Gesture Performance Dashboard' in dashboard
+        assert 'Total Gestures:' in dashboard
+        assert 'Accuracy:' in dashboard

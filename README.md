@@ -138,6 +138,79 @@ Suggested documentation captions:
 - Reusable multimodal pipeline suitable for research and product prototyping
 - Strong extensibility for future AI-assisted interaction capabilities
 
+## Performance Evaluation
+
+This section defines how runtime quality is measured in MMGI and how results
+should be interpreted for technical evaluation or benchmarking.
+
+### Accuracy Metrics
+
+MMGI tracks two complementary accuracy views:
+
+- Model-mapped accuracy: ratio of mapped correct gesture predictions to total
+	detected gesture predictions.
+- Feedback-validated accuracy: ratio of user-confirmed correct actions to total
+	feedback responses (correct/incorrect), excluding skipped feedback entries.
+
+Primary formulas:
+
+- Gesture prediction accuracy (%) = (correct_predictions / total_gestures_detected) x 100
+- Feedback accuracy (%) = (feedback_correct / feedback_total) x 100
+- False activation rate (%) = (false_activations / activation_attempts) x 100
+
+### Feedback System
+
+MMGI uses a human-in-the-loop validation cycle to measure practical correctness
+at action level:
+
+- After each executed action (headless mode), the system prompts for outcome:
+	correct, incorrect, or skip.
+- Responses are persisted as structured JSON events.
+- Feedback counters are aggregated into runtime metrics and reports.
+- When feedback data is present, feedback-validated accuracy is used as the
+	stronger indicator of real-world control quality.
+
+This approach captures execution-level quality, not just classifier matching,
+and provides a more realistic measure under varied contexts.
+
+### How Performance Is Measured
+
+Recommended evaluation protocol:
+
+1. Run sessions across multiple contexts (App, Media, System) and at least two
+	 ambient noise conditions.
+2. Execute a fixed command suite per mode with repeated trials.
+3. Record runtime summaries and event logs for each session.
+4. Compare model-mapped accuracy and feedback-validated accuracy together.
+5. Include latency and false activation rate in final quality judgment.
+
+Operational telemetry includes:
+
+- Total gestures detected
+- Correct/incorrect predictions
+- Accuracy percentage
+- Feedback totals and feedback accuracy
+- Average response latency (ms)
+- False activation rate (%)
+- Mode switches per minute
+
+### Sample Results
+
+Illustrative sample (for reporting format reference):
+
+| Scenario | Total Gestures | Prediction Accuracy | Feedback Accuracy | Avg Latency (ms) | False Activation Rate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Controlled indoor lighting | 420 | 93.6% | 91.4% | 27.8 | 3.1% |
+| Moderate ambient noise | 405 | 91.1% | 88.2% | 30.9 | 4.4% |
+| High-noise environment | 398 | 88.4% | 84.7% | 34.6 | 6.0% |
+
+Interpretation guidance:
+
+- Prediction accuracy reflects recognition pipeline quality.
+- Feedback accuracy reflects user-perceived correctness at execution time.
+- Latency and false activations capture interaction stability and usability.
+- Final evaluation should prioritize a balanced profile across all four axes.
+
 ## Metrics Tracking
 
 The runtime pipeline includes a lightweight metrics manager in engine/metrics_manager.py.

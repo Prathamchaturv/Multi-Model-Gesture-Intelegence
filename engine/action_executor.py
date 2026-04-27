@@ -59,6 +59,9 @@ class ActionExecutor:
         'left_click':        'Left Click',
         'right_click':       'Right Click',
         'double_click':      'Double Click',
+        'seek_forward':      'Seek Forward',
+        'seek_backward':     'Seek Backward',
+        'switch_apps':       'Switch Apps',
     }
 
     # pyautogui key names for media / volume actions
@@ -148,6 +151,15 @@ class ActionExecutor:
 
             elif action == 'double_click':
                 self._double_click()
+
+            elif action == 'seek_forward':
+                self._press('right')
+
+            elif action == 'seek_backward':
+                self._press('left')
+
+            elif action == 'switch_apps':
+                self._hotkey('alt', 'tab')
 
             elif action in self._KEY_MAP:
                 self._press(self._KEY_MAP[action])

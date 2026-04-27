@@ -24,6 +24,7 @@ from core.hand_tracking import HandTracker
 from execution.cursor_control import ActionExecutor
 from engine.activation_manager import ActivationManager
 from core.decision_engine import DecisionEngine
+from engine.context_aware_gesture import get_context, handle_gesture
 from engine.unified_pipeline import InputEventNormalizer, ModeManager, UnifiedDecisionPipeline
 from utils.config import Config
 
@@ -111,6 +112,7 @@ def build_runtime(initial_mode: str) -> dict[str, object]:
         'gesture_classifier': gesture_classifier,
         'activation_manager': activation_manager,
         'decision_engine': decision_engine,
+        'action_executor': action_executor,
         'unified_pipeline': unified_pipeline,
     }
 
@@ -125,6 +127,7 @@ def run_cli(mode: str, max_frames: int) -> int:
     gesture_classifier: GestureClassifier = runtime['gesture_classifier']  # type: ignore[assignment]
     activation_manager: ActivationManager = runtime['activation_manager']  # type: ignore[assignment]
     decision_engine: DecisionEngine = runtime['decision_engine']  # type: ignore[assignment]
+    action_executor: ActionExecutor = runtime['action_executor']  # type: ignore[assignment]
     unified_pipeline: UnifiedDecisionPipeline = runtime['unified_pipeline']  # type: ignore[assignment]
 
     if max_frames < 0:
@@ -172,15 +175,26 @@ def run_cli(mode: str, max_frames: int) -> int:
             should_execute_action = activation_manager.update(gesture)
 
             if gesture and (decision_engine.is_mode_switch(gesture) or should_execute_action):
-                event = InputEventNormalizer.from_gesture(gesture=gesture, confidence=1.0)
-                decision = unified_pipeline.process_event(event, frame_bgr=frame)
+                action = None
+                if should_execute_action and not decision_engine.is_mode_switch(gesture):
+                    context = get_context()
+                    context_action = handle_gesture(gesture, context)
+                    if context_action:
+                        action_executor.execute(context_action)
+                        action = context_action
 
-                if decision.mode_changed:
-                    print(f'[CLI] Mode changed -> {decision.mode}')
-                elif decision.blocked_reason:
-                    print(f'[CLI] Action blocked: {decision.blocked_reason}')
-                elif decision.action:
-                    print(f'[CLI] Action executed: {decision.action}')
+                if action is None:
+                    event = InputEventNormalizer.from_gesture(gesture=gesture, confidence=1.0)
+                    decision = unified_pipeline.process_event(event, frame_bgr=frame)
+
+                    if decision.mode_changed:
+                        print(f'[CLI] Mode changed -> {decision.mode}')
+                    elif decision.blocked_reason:
+                        print(f'[CLI] Action blocked: {decision.blocked_reason}')
+                    elif decision.action:
+                        print(f'[CLI] Action executed: {decision.action}')
+                else:
+                    print(f'[CLI] Action executed: {action}')
 
             processed_frames += 1
             if max_frames and processed_frames >= max_frames:

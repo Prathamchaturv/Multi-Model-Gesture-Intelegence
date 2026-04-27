@@ -791,7 +791,6 @@ class VisionPanel(QWidget):
         self._state = state
         self._current_mode = 'App Mode'
         self._current_user_state = 'open'
-        self._voice_history_last_text = ''
         self._build_ui()
         self._connect_state()
 
@@ -951,65 +950,6 @@ class VisionPanel(QWidget):
         qc_lay.addWidget(self._gesture_btn)
         qc_lay.addWidget(self._mic_btn)
         root.addWidget(quick_controls)
-
-        voice_card = QFrame()
-        voice_card.setStyleSheet(
-            f'QFrame {{ background: rgba(18, 26, 45, 0.84); border: 1px solid rgba(123,233,255,0.14); border-radius: 12px; }}'
-        )
-        voice_lay = QVBoxLayout(voice_card)
-        voice_lay.setContentsMargins(12, 10, 12, 10)
-        voice_lay.setSpacing(6)
-
-        voice_title = QLabel('VOICE COMMAND INTERFACE')
-        voice_title.setStyleSheet(
-            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 1px; background: transparent; border: none;'
-        )
-        voice_lay.addWidget(voice_title)
-
-        self._voice_status_lbl = QLabel('Listening...')
-        self._voice_status_lbl.setStyleSheet(
-            f'color: {MODE_MEDIA}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
-        )
-        voice_lay.addWidget(self._voice_status_lbl)
-
-        self._voice_textbox = QTextEdit()
-        self._voice_textbox.setReadOnly(True)
-        self._voice_textbox.setPlaceholderText('Recognized speech will appear here...')
-        self._voice_textbox.setMaximumHeight(72)
-        self._voice_textbox.setStyleSheet(f"""
-            QTextEdit {{
-                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
-                border-radius: 8px; padding: 6px; font-size: 12px;
-            }}
-        """)
-        voice_lay.addWidget(self._voice_textbox)
-
-        history_title = QLabel('Recent Voice Commands')
-        history_title.setStyleSheet(
-            f'color: {TEXT_SEC}; font-size: 10px; font-weight: 600; letter-spacing: 1px; background: transparent; border: none;'
-        )
-        voice_lay.addWidget(history_title)
-
-        self._voice_history_list = QListWidget()
-        self._voice_history_list.setMaximumHeight(116)
-        self._voice_history_list.setStyleSheet(f"""
-            QListWidget {{
-                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
-                border-radius: 8px; padding: 2px; font-size: 11px;
-            }}
-            QListWidget::item {{
-                padding: 4px 6px;
-                border-bottom: 1px solid {BORDER};
-            }}
-            QListWidget::item:selected {{
-                background: rgba(56,221,248,0.18);
-                color: {TEXT_PRI};
-            }}
-        """)
-        self._voice_history_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
-        voice_lay.addWidget(self._voice_history_list)
-
-        root.addWidget(voice_card)
 
         # ── Mode-switch stability bar ─────────────────────────────────
         stab_lbl = QLabel('MODE SWITCH HOLD')
@@ -1210,33 +1150,6 @@ class VisionPanel(QWidget):
         self._voice_command_val.setText(self._compact_text(text, 18))
         self._voice_command_val.setToolTip(text)
 
-        if 'listening' in text.lower() or 'mic active' in text.lower():
-            self._voice_status_lbl.setText('Listening...')
-            self._voice_status_lbl.setStyleSheet(
-                f'color: {MODE_MEDIA}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
-            )
-        elif 'off' in text.lower() or 'unavailable' in text.lower() or 'error' in text.lower():
-            self._voice_status_lbl.setText('Mic Idle')
-            self._voice_status_lbl.setStyleSheet(
-                f'color: {INACTIVE}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
-            )
-        else:
-            self._voice_status_lbl.setText('Command Recognized')
-            self._voice_status_lbl.setStyleSheet(
-                f'color: {ACTIVE}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
-            )
-
-        self._voice_textbox.setPlainText(text)
-
-        normalized = text.strip().lower()
-        if normalized and normalized != self._voice_history_last_text:
-            ts = time.strftime('%H:%M:%S')
-            entry = QListWidgetItem(f'[{ts}] {text}')
-            self._voice_history_list.insertItem(0, entry)
-            while self._voice_history_list.count() > 10:
-                self._voice_history_list.takeItem(self._voice_history_list.count() - 1)
-            self._voice_history_last_text = normalized
-
     @pyqtSlot(bool, str)
     def _on_face_auth_changed(self, authorized: bool, status_text: str) -> None:
         full = status_text if status_text else 'Face Auth: Idle'
@@ -1405,18 +1318,10 @@ class VisionPanel(QWidget):
                 f'QPushButton {{ background: rgba(96,165,250,0.12); color: {MODE_MEDIA}; border: 1px solid {MODE_MEDIA}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
                 f'QPushButton:hover {{ background: rgba(96,165,250,0.24); }}'
             )
-            self._voice_status_lbl.setText('Listening...')
-            self._voice_status_lbl.setStyleSheet(
-                f'color: {MODE_MEDIA}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
-            )
         else:
             self._mic_btn.setStyleSheet(
                 f'QPushButton {{ background: rgba(255,107,135,0.12); color: {INACTIVE}; border: 1px solid {INACTIVE}; border-radius: 9px; padding: 6px 10px; font-size: 11px; font-weight: 700; }}'
                 f'QPushButton:hover {{ background: rgba(255,107,135,0.24); }}'
-            )
-            self._voice_status_lbl.setText('Mic Idle')
-            self._voice_status_lbl.setStyleSheet(
-                f'color: {INACTIVE}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
             )
 
 
@@ -2784,6 +2689,8 @@ class SettingsPanel(QWidget):
         self._state.confidence_changed.connect(self._on_live_confidence)
         self._state.gesture_status_changed.connect(self._on_live_gesture_status)
         self._state.mode_changed.connect(self._on_mode_changed)
+        self._state.voice_command_changed.connect(self._on_settings_voice_command)
+        self._state.voice_listener_enabled_changed.connect(self._on_settings_voice_state)
 
     def _build_ui(self) -> None:
         self.setStyleSheet(f'background-color: {BG_DEEP};')
@@ -2909,6 +2816,40 @@ class SettingsPanel(QWidget):
         runtime_lay.addLayout(mode_row)
 
         root.addWidget(runtime_card)
+
+        voice_small_card = QFrame()
+        voice_small_card.setStyleSheet(
+            f'QFrame {{ background: {BG_CARD}; border: 1px solid {BORDER}; border-radius: 12px; }}'
+        )
+        voice_small_lay = QVBoxLayout(voice_small_card)
+        voice_small_lay.setContentsMargins(16, 12, 16, 12)
+        voice_small_lay.setSpacing(6)
+
+        voice_small_title = QLabel('VOICE COMMAND INTERFACE')
+        voice_small_title.setStyleSheet(
+            f'color: {ACCENT}; font-size: 10px; font-weight: 700; letter-spacing: 2px; background: transparent; border: none;'
+        )
+        voice_small_lay.addWidget(voice_small_title)
+        voice_small_lay.addWidget(_divider())
+
+        self._settings_voice_status_lbl = QLabel('Listening...')
+        self._settings_voice_status_lbl.setStyleSheet(
+            f'color: {MODE_MEDIA}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+        )
+        voice_small_lay.addWidget(self._settings_voice_status_lbl)
+
+        self._settings_voice_text = QLineEdit()
+        self._settings_voice_text.setReadOnly(True)
+        self._settings_voice_text.setPlaceholderText('Recognized speech appears here...')
+        self._settings_voice_text.setStyleSheet(f"""
+            QLineEdit {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 6px; padding: 5px 8px; font-size: 11px;
+            }}
+        """)
+        voice_small_lay.addWidget(self._settings_voice_text)
+
+        root.addWidget(voice_small_card)
 
         # ── Detection & Response Controls ──────────────────────────────
         detection_card = QFrame()
@@ -3300,6 +3241,39 @@ class SettingsPanel(QWidget):
         self._context_media_input.setText(', '.join(context_cfg.get('media_keywords', [])))
         self._context_browser_input.blockSignals(False)
         self._context_media_input.blockSignals(False)
+
+        self._on_settings_voice_state(bool(self._state.voice_listener_enabled))
+        self._on_settings_voice_command(self._state.voice_command)
+
+    @pyqtSlot(str)
+    def _on_settings_voice_command(self, command_text: str) -> None:
+        text = command_text.strip() if command_text else ''
+        if not text:
+            text = '—'
+        self._settings_voice_text.setText(text)
+
+        lower = text.lower()
+        if 'listening' in lower or 'mic active' in lower:
+            self._settings_voice_status_lbl.setText('Listening...')
+            self._settings_voice_status_lbl.setStyleSheet(
+                f'color: {MODE_MEDIA}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+            )
+        elif 'off' in lower or 'unavailable' in lower or 'error' in lower:
+            self._settings_voice_status_lbl.setText('Mic Idle')
+            self._settings_voice_status_lbl.setStyleSheet(
+                f'color: {INACTIVE}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+            )
+        else:
+            self._settings_voice_status_lbl.setText('Command Recognized')
+            self._settings_voice_status_lbl.setStyleSheet(
+                f'color: {ACTIVE}; font-size: 11px; font-weight: 700; background: transparent; border: none;'
+            )
+
+    @pyqtSlot(bool)
+    def _on_settings_voice_state(self, enabled: bool) -> None:
+        self._voice_toggle.blockSignals(True)
+        self._voice_toggle.setChecked(enabled)
+        self._voice_toggle.blockSignals(False)
 
     @staticmethod
     def _parse_keywords(raw: str) -> list[str]:

@@ -44,6 +44,7 @@ def run_headless(max_frames: int = 0) -> None:
     from core.face_security       import FaceSecurityManager
     from engine.activation_manager import ActivationManager
     from core.decision_engine      import DecisionEngine
+    from engine.context_aware_gesture import get_context, handle_gesture
     from execution.cursor_control  import ActionExecutor
     from engine.unified_pipeline   import InputEventNormalizer, ModeManager, UnifiedDecisionPipeline
     from utils.fps_counter         import FPSCounter
@@ -168,15 +169,25 @@ def run_headless(max_frames: int = 0) -> None:
                 action_executor.execute(custom_action)
                 action = custom_action
             elif processing_enabled and gesture:
+                if should_exec and not decision_engine.is_mode_switch(gesture):
+                    context = get_context()
+                    context_action = handle_gesture(gesture, context)
+                    if context_action:
+                        action_executor.execute(context_action)
+                        action = context_action
+
                 if decision_engine.is_mode_switch(gesture) or should_exec:
-                    event = InputEventNormalizer.from_gesture(
-                        gesture=gesture,
-                        confidence=1.0,
-                    )
-                    decision = unified_pipeline.process_event(event, frame_bgr=frame)
-                    if decision.mode_changed:
-                        print(f'  Mode -> {decision.mode}')
-                    action = decision.action
+                    # Fall back to the existing mode-aware pipeline when there is
+                    # no context override for the current gesture.
+                    if action is None:
+                        event = InputEventNormalizer.from_gesture(
+                            gesture=gesture,
+                            confidence=1.0,
+                        )
+                        decision = unified_pipeline.process_event(event, frame_bgr=frame)
+                        if decision.mode_changed:
+                            print(f'  Mode -> {decision.mode}')
+                        action = decision.action
 
             if action:
                 print(f'  Action: {action}')

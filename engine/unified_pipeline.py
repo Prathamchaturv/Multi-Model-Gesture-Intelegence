@@ -221,7 +221,9 @@ class UnifiedDecisionPipeline:
                 mode=self._mode_manager.current_mode,
             )
 
-        if self._conflict_resolver.should_drop(action, event):
+        # Skip conflict resolution for voice commands - they should always execute
+        # Only apply conflict resolution to gesture events
+        if event.type != 'voice' and self._conflict_resolver.should_drop(action, event):
             return PipelineDecision(
                 action=None,
                 mode_changed=False,

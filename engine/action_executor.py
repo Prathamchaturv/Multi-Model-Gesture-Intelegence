@@ -23,9 +23,11 @@ Displays a fading on-screen notification for each action executed.
 """
 
 import os
+import sys
 import time
 import subprocess
 import webbrowser
+import ctypes
 import cv2
 from utils.logger import log_runtime_error
 
@@ -74,6 +76,15 @@ class ActionExecutor:
         'mute':        'volumemute',
     }
 
+    _WIN_MEDIA_VK: dict[str, int] = {
+        'next_track':  0xB0,
+        'prev_track':  0xB1,
+        'play_pause':  0xB3,
+        'volume_up':   0xAF,
+        'volume_down': 0xAE,
+        'mute':        0xAD,
+    }
+
     _FEEDBACK_DURATION: float = 2.5   # seconds to show on-screen notification
     _COOLDOWN:          float = 1.0   # seconds before the same action may fire again
     _GLOBAL_COOLDOWN:   float = 1.0   # minimum gap between any two actions
@@ -120,6 +131,7 @@ class ActionExecutor:
 
         label = self._LABELS.get(action, action)
         print(f'  [{action}] {label}')
+        print(f'  [DEBUG] ActionExecutor.execute() called with: {action}')
 
         try:
             if action == 'open_brave':
@@ -160,6 +172,10 @@ class ActionExecutor:
 
             elif action == 'switch_apps':
                 self._hotkey('alt', 'tab')
+
+            elif action in self._WIN_MEDIA_VK:
+                print(f'  [DEBUG] {action} is in WIN_MEDIA_VK, calling _press_media_key()')
+                self._press_media_key(action)
 
             elif action in self._KEY_MAP:
                 self._press(self._KEY_MAP[action])
@@ -225,11 +241,76 @@ class ActionExecutor:
         print(f'  [ActionExecutor] Launched Store app: {aumid}')
 
     def _press(self, key: str) -> None:
-        """Send a keyboard event via pyautogui."""
+        """Send a keyboard event via pyautogui. Use only for non-media keys."""
         if _PYAUTOGUI:
             pyautogui.press(key)
         else:
             print(f'  [ActionExecutor] pyautogui unavailable — cannot press "{key}"')
+
+    def _press_media_key(self, action: str) -> None:
+        """Send a Windows media key using nircmd, keybd_event, or fallback."""
+        vk = self._WIN_MEDIA_VK.get(action)
+        print(f'  [ActionExecutor] _press_media_key called: action={action} vk={hex(vk) if vk else None}')
+        if vk is None:
+            print(f'  [ActionExecutor] ERROR: Action {action} not in WIN_MEDIA_VK')
+            return
+        
+        # Try nircmd approach (most reliable for media control on Windows)
+        if sys.platform.startswith('win'):
+            nircmd_commands = {
+                'mute': 'nircmd.exe muteappvolume 0 toggle',
+                'volume_up': 'nircmd.exe changeappvolume 0 5',
+                'volume_down': 'nircmd.exe changeappvolume 0 -5',
+                'next_track': 'nircmd.exe sendkeys 176',
+                'prev_track': 'nircmd.exe sendkeys 177',
+                'play_pause': 'nircmd.exe sendkeys 179',
+            }
+            
+            # First check if nircmd is available
+            try:
+                result = subprocess.run(
+                    ['where', 'nircmd.exe'],
+                    capture_output=True,
+                    timeout=1,
+                    check=False,
+                )
+                nircmd_available = result.returncode == 0
+            except:
+                nircmd_available = False
+            
+            if nircmd_available and action in nircmd_commands:
+                try:
+                    print(f'  [ActionExecutor] Trying nircmd for {action}')
+                    result = subprocess.run(
+                        nircmd_commands[action],
+                        capture_output=True,
+                        timeout=2,
+                        check=False,
+                    )
+                    if result.returncode == 0 or result.returncode == 1:  # nircmd returns 1 on success sometimes
+                        print(f'  [ActionExecutor] SUCCESS: Media key {action} sent via nircmd')
+                        return
+                except Exception as exc:
+                    print(f'  [ActionExecutor] nircmd failed: {exc}')
+            
+            # Fallback: Try keybd_event
+            try:
+                print(f'  [ActionExecutor] Trying keybd_event for {action}')
+                print(f'  [ActionExecutor] Sending Windows keybd_event(0x{vk:02X}, press)')
+                ctypes.windll.user32.keybd_event(vk, 0, 0, 0)
+                time.sleep(0.05)  # Add small delay between press and release
+                print(f'  [ActionExecutor] Sending Windows keybd_event(0x{vk:02X}, release)')
+                ctypes.windll.user32.keybd_event(vk, 0, 2, 0)
+                print(f'  [ActionExecutor] SUCCESS: Media key {action} sent via Windows keybd_event API')
+                return
+            except Exception as exc:
+                print(f'  [ActionExecutor] Windows keybd_event failed for {action}: {exc}')
+        
+        if _PYAUTOGUI:
+            print(f'  [ActionExecutor] Final fallback: Sending via pyautogui.press({self._KEY_MAP.get(action, action)})')
+            pyautogui.press(self._KEY_MAP.get(action, action))
+        else:
+            print(f'  [ActionExecutor] ERROR: No method available to trigger media key {action}')
 
     def _hotkey(self, *keys: str) -> None:
         """Send a keyboard shortcut via pyautogui."""

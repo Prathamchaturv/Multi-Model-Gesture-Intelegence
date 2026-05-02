@@ -232,7 +232,7 @@ def _load_voice_control_settings(config: Config) -> dict:
         'request_error_backoff_s': float(config.get('voice_control.request_error_backoff_s', 1.5)),
         'max_request_error_backoff_s': float(config.get('voice_control.max_request_error_backoff_s', 8.0)),
         'command_groups': dict(config.get('voice_control.command_groups', {})),
-        'system_mode_only': bool(config.get('voice_control.system_mode_only', True)),
+        'system_mode_only': bool(config.get('voice_control.system_mode_only', False)),
         'system_mode_voice_actions': dict(config.get('voice_control.system_mode_voice_actions', {
             'open_brave': 'open_brave',
             'open_apple_music': 'open_apple_music',
@@ -547,11 +547,26 @@ class WorkerThread(QThread):
                 command_groups=dict(voice_cfg.get('command_groups', {})),
                 command_config_path=Path(__file__).parent.parent / 'config' / 'voice_control.json',
             )
-            voice_enabled_for_fusion = voice_listener.is_enabled
+            # Use configured "enabled" flag for UI state so the dashboard
+            # reflects user intent even if a microphone backend is missing.
+            voice_enabled_for_fusion = bool(voice_cfg.get('enabled', True))
             voice_system_mode_only = bool(voice_cfg.get('system_mode_only', True))
             voice_listener.start()
             state.set_voice_listener_enabled(voice_enabled_for_fusion)
-            state.set_voice_command('Listening...' if voice_enabled_for_fusion else 'Voice Unavailable')
+            # Provide a clearer initial status: prefer to show listener diagnostics
+            # rather than silently marking voice control as off when backends fail.
+            if voice_listener.is_enabled:
+                state.set_voice_command('Listening...')
+            elif voice_listener.last_error:
+                state.set_voice_command(f'Voice Error: {voice_listener.last_error}')
+            else:
+                state.set_voice_command('Voice Unavailable')
+
+            # Emit diagnostic log about listener capabilities so users can
+            # quickly identify missing dependencies (PyAudio / sounddevice).
+            avail = getattr(voice_listener, 'is_available', False)
+            ready = getattr(voice_listener, 'is_ready', False)
+            state.emit_log(_ts(), 'SYSTEM', f'VoiceListener avail={avail} enabled_prop={voice_listener.is_enabled} ready={ready}')
             last_voice_error: str | None = None
             voice_retry_at = 0.0
 
@@ -886,6 +901,21 @@ class WorkerThread(QThread):
                         ),
                     )
 
+                # Reload voice_control.json if it has changed
+                try:
+                    voice_cfg_path = Path(__file__).parent.parent / 'config' / 'voice_control.json'
+                    current_voice_sig = (voice_cfg_path.stat().st_mtime_ns, voice_cfg_path.stat().st_size) if voice_cfg_path.exists() else None
+                    if not hasattr(self, '_last_voice_cfg_sig'):
+                        self._last_voice_cfg_sig = current_voice_sig
+                    if current_voice_sig != self._last_voice_cfg_sig:
+                        voice_cfg = _load_voice_control_settings(config)
+                        voice_system_mode_only = bool(voice_cfg.get('system_mode_only', False))
+                        voice_enabled_for_fusion = bool(voice_cfg.get('enabled', True))
+                        self._last_voice_cfg_sig = current_voice_sig
+                        state.emit_log(_ts(), 'SYSTEM', f'Voice config reloaded: system_mode_only={voice_system_mode_only}')
+                except Exception as exc:
+                    log_runtime_error(f'Voice config reload failed: {exc}')
+
                 if state.requested_mode != mode_manager.current_mode:
                     mode_manager.set_mode(state.requested_mode)
                     decision_engine.current_mode = mode_manager.current_mode
@@ -929,9 +959,11 @@ class WorkerThread(QThread):
                 if voice_listener is not None and voice_enabled_for_fusion:
                     voice_event = voice_listener.poll_latest()
                     if voice_event is not None:
+                        state.emit_log(_ts(), 'DEBUG', f'[VOICE-0] Polled voice_listener: voice_event={voice_event.command} transcript={voice_event.transcript}')
                         if time.time() < voice_backoff_until:
                             state.set_voice_command('Voice in recovery window...')
                             voice_event = None
+                            state.emit_log(_ts(), 'DEBUG', f'[VOICE-0C] voice_event set to None due to backoff window')
                         else:
                             if voice_event.command == '__unmapped__':
                                 transcript = voice_event.transcript.strip()
@@ -940,11 +972,22 @@ class WorkerThread(QThread):
                                 state.set_voice_command(f'Heard: {transcript}')
                                 log_voice_command_event(voice_event.transcript, mapped=False, details='unmapped')
                                 state.emit_log(_ts(), 'SYSTEM', f'Voice heard (unmapped): {voice_event.transcript}')
+                                # DEBUG: record mode state at time of unmapped voice
+                                try:
+                                    state.emit_log(_ts(), 'DEBUG', f'Mode states at voice: mode_manager={mode_manager.current_mode} decision_engine={decision_engine.current_mode} shared_state={state.current_mode} requested_mode={state.requested_mode}')
+                                except Exception:
+                                    pass
                             else:
                                 voice_text = _voice_label(voice_event.command)
                                 state.set_voice_command(voice_text)
+                                state.emit_log(_ts(), 'DEBUG', f'[VOICE-0D] ✅ MAPPED command recognized: {voice_event.command}')
                                 log_voice_command_event(voice_event.command, mapped=True, details='recognized')
                                 state.emit_log(_ts(), 'ACTION', f'Voice command detected: {voice_text}')
+                                # DEBUG: record mode state at time of recognized voice
+                                try:
+                                    state.emit_log(_ts(), 'DEBUG', f'Mode states at voice: mode_manager={mode_manager.current_mode} decision_engine={decision_engine.current_mode} shared_state={state.current_mode} requested_mode={state.requested_mode}')
+                                except Exception:
+                                    pass
                     elif voice_listener.last_error and voice_listener.last_error != last_voice_error:
                         last_voice_error = voice_listener.last_error
                         voice_backoff_until = time.time() + 5.0
@@ -1275,6 +1318,27 @@ class WorkerThread(QThread):
                 )
                 lock_active = (time.time() < uncertainty_lock_until) or face_lock_active
                 runtime_locked_reason = None
+                
+                # ---- Process voice commands BEFORE lock gates ----
+                # Voice commands should always be available, even during security locks
+                state.emit_log(_ts(), 'DEBUG', f'[VOICE-DBG] voice_event={voice_event is not None} voice_enabled_for_fusion={voice_enabled_for_fusion}')
+                if voice_event is not None and voice_event.command != '__unmapped__' and voice_enabled_for_fusion:
+                    state.emit_log(_ts(), 'DEBUG', f'[VOICE-1A] voice_event polled: cmd={voice_event.command} system_mode_only={voice_system_mode_only} current_mode={mode_manager.current_mode}')
+                    if (not voice_system_mode_only) or mode_manager.current_mode == 'System Mode':
+                        voice_command = voice_event.command
+                        voice_input_event = InputEventNormalizer.from_voice(
+                            command=voice_command,
+                            confidence=voice_confidence,
+                            timestamp=voice_event.timestamp,
+                        )
+                        state.emit_log(_ts(), 'DEBUG', f'[VOICE-1] ✅ voice_input_event created: command={voice_command}')
+                    else:
+                        state.emit_log(_ts(), 'DEBUG', f'[VOICE-1] ❌ voice blocked by mode gate: system_mode_only={voice_system_mode_only} mode={mode_manager.current_mode}')
+                elif voice_event is not None and voice_event.command == '__unmapped__':
+                    state.emit_log(_ts(), 'DEBUG', f'[VOICE-1] voice_event unmapped: transcript={voice_event.transcript}')
+                elif voice_event is not None:
+                    state.emit_log(_ts(), 'DEBUG', f'[VOICE-1] voice_event exists but not eligible: voice_enabled_for_fusion={voice_enabled_for_fusion}')
+                
                 if lock_active:
                     if face_lock_active:
                         runtime_locked_reason = 'Face authorization required'
@@ -1288,6 +1352,12 @@ class WorkerThread(QThread):
                                 last_safety_lock_log = now
                             log_runtime_error('Safety lock active due to uncertain gesture input')
                         uncertainty_lock_was_active = True
+                    # Even when runtime is locked for gestures, allow explicit voice
+                    # commands to pass through so users can control the system by voice.
+                    if voice_input_event is not None:
+                        state.emit_log(_ts(), 'DEBUG', f'[VOICE-1B] ✅ Adding voice to pending_events IN LOCK PATH')
+                        pending_events.append((voice_input_event, None, 'Voice', time.perf_counter()))
+
                 else:
                     uncertainty_lock_was_active = False
                     is_mode_switch_gesture = bool(
@@ -1297,11 +1367,23 @@ class WorkerThread(QThread):
                     )
 
                     if not safety_input_ok:
+                        # Preserve voice events even when gesture input is unsafe
+                        voice_event_to_preserve = None
+                        if voice_input_event is not None:
+                            voice_event_to_preserve = (voice_input_event, None, 'Voice', time.perf_counter())
+                            state.emit_log(_ts(), 'DEBUG', f'[VOICE-1D] Preserving voice during safety_input_ok=False clear')
                         pending_events.clear()
+                        if voice_event_to_preserve is not None:
+                            pending_events.append(voice_event_to_preserve)
                         if scroll_active:
                             scroll_active = False
                             scroll_gesture_frame_count = 0
                             scroll_direction = None
+                    
+                    # ---- Add voice events to pipeline even when not locked ----
+                    if voice_input_event is not None:
+                        state.emit_log(_ts(), 'DEBUG', f'[VOICE-1C] ✅ Adding voice to pending_events IN NORMAL PATH')
+                        pending_events.append((voice_input_event, None, 'Voice', time.perf_counter()))
                     # =========================================================
                     # Gesture conflict resolution: Scroll vs Clicks
                     # Priority: Scroll > Clicks (in System Mode)
@@ -1377,15 +1459,6 @@ class WorkerThread(QThread):
                                 confidence=effective_confidence,
                             )
 
-                    if voice_event is not None and voice_event.command != '__unmapped__' and voice_enabled_for_fusion:
-                        if (not voice_system_mode_only) or mode_manager.current_mode == 'System Mode':
-                            voice_command = voice_event.command
-                            voice_input_event = InputEventNormalizer.from_voice(
-                                command=voice_command,
-                                confidence=voice_confidence,
-                                timestamp=voice_event.timestamp,
-                            )
-
                     fused_events = fusion_layer.merge(
                         gesture_event=gesture_event,
                         voice_event=voice_input_event,
@@ -1403,11 +1476,15 @@ class WorkerThread(QThread):
                         runtime_locked_reason = 'Face authorization required'
                     elif overload_guard.active:
                         runtime_locked_reason = 'Overload protection'
-                    elif not hand_present:
+                    elif not system_is_active and not hand_present:
+                        # Only report "No hand detected" if system is NOT already active
+                        # Once activated, hand absence is allowed (system stays active)
                         runtime_locked_reason = 'No hand detected'
-                    elif confidence < low_conf_threshold:
+                    elif not system_is_active and confidence < low_conf_threshold:
+                        # Only report low confidence if system is NOT already active
                         runtime_locked_reason = 'Low confidence input'
-                    elif gesture_verification_status != 'Stable':
+                    elif not system_is_active and gesture_verification_status != 'Stable':
+                        # Only wait for stable gesture if system is NOT already active
                         runtime_locked_reason = 'Waiting for stable gesture'
 
                 if runtime_locked_reason:
@@ -1496,6 +1573,14 @@ class WorkerThread(QThread):
                         face_verified=face_authorized,
                     )
 
+                    # DEBUG: comprehensive pipeline processing log
+                    if event.type == 'voice':
+                        state.emit_log(_ts(), 'DEBUG', f'[VOICE-2] Pipeline result: cmd={event.command} type={event.type} action={result.action} blocked_reason={result.blocked_reason} mode={result.mode}')
+                        if result.action:
+                            state.emit_log(_ts(), 'DEBUG', f'[VOICE-3] ✅ ACTION TO EXECUTE: {result.action}')
+                        else:
+                            state.emit_log(_ts(), 'DEBUG', f'[VOICE-3] ❌ NO ACTION: blocked={result.blocked_reason}')
+
                     if result.mode_changed:
                         metrics.record_mode_switch()
                         state.set_mode(result.mode)
@@ -1518,6 +1603,7 @@ class WorkerThread(QThread):
                             state.emit_log(_ts(), 'SYSTEM', f'Adaptive control: {result.auth_feedback or result.blocked_reason}')
 
                     if result.action:
+                        action_executor.execute(result.action)
                         last_action_e2e_latency_ms = (time.perf_counter() - event_start_perf) * 1000.0
                         metrics.record_activation_attempt(succeeded=True)
                         label = action_executor._LABELS.get(result.action, result.action)

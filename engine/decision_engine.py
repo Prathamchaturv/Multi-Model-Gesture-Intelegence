@@ -358,7 +358,12 @@ class DecisionEngine:
         if not action:
             return DecisionOutcome(confidence=confidence, reason='unmapped_command')
 
-        if action not in self._action_whitelist.get(target_mode, set()):
+        if event_type == 'voice':
+            allowed_actions = set().union(*self._action_whitelist.values()) if self._action_whitelist else set()
+        else:
+            allowed_actions = self._action_whitelist.get(target_mode, set())
+
+        if action not in allowed_actions:
             return DecisionOutcome(confidence=confidence, reason='action_not_whitelisted')
 
         return DecisionOutcome(action=action, confidence=confidence)
@@ -371,8 +376,14 @@ class DecisionEngine:
         target_mode = mode if mode is not None else self.current_mode
         action = self._voice_action_maps.get(target_mode, {}).get(command)
         if not action:
+            for fallback_mode in MODES:
+                action = self._voice_action_maps.get(fallback_mode, {}).get(command)
+                if action:
+                    break
+        if not action:
             return None
-        if action not in self._action_whitelist.get(target_mode, set()):
+        allowed_actions = set().union(*self._action_whitelist.values()) if self._action_whitelist else set()
+        if action not in allowed_actions:
             return None
         return action
 
@@ -447,12 +458,16 @@ class DecisionEngine:
         }
 
         if event_type == 'voice':
-            action = self._voice_action_maps.get(mode, {}).get(command)
-            if action:
-                return action
-            alias = voice_aliases.get(command)
-            if alias:
-                return self._voice_action_maps.get(mode, {}).get(alias)
+            modes_to_check = [mode] + [candidate for candidate in MODES if candidate != mode]
+            for candidate_mode in modes_to_check:
+                action = self._voice_action_maps.get(candidate_mode, {}).get(command)
+                if action:
+                    return action
+                alias = voice_aliases.get(command)
+                if alias:
+                    action = self._voice_action_maps.get(candidate_mode, {}).get(alias)
+                    if action:
+                        return action
             return None
 
         action = self._action_maps.get(mode, {}).get(command)

@@ -26,7 +26,15 @@
       "open_youtube": "open_youtube",
       "close_window": "close_window",
       "switch_tab": "switch_tab",
-      "scroll_down": "scroll_down"
+      "scroll_down": "scroll_down",
+      "scroll_up": "scroll_up",
+      "play_song": "play_pause",
+      "pause": "play_pause",
+      "next_track": "next_track",
+      "previous_track": "prev_track",
+      "volume_up": "volume_up",
+      "volume_down": "volume_down",
+      "mute": "mute"
     },
     "Media Mode": {
       "open_youtube": "open_youtube",

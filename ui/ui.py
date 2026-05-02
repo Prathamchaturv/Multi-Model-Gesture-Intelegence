@@ -3600,6 +3600,18 @@ class SystemPanel(QWidget):
         self._voice_indicator = StatusIndicator('Voice Command', MODE_MEDIA)
         status_lay.addWidget(self._voice_indicator)
         state.voice_command_changed.connect(self._on_voice_updated)
+
+        # Compact read-only field showing the full last-recognized voice text
+        self._main_voice_text = QLineEdit()
+        self._main_voice_text.setReadOnly(True)
+        self._main_voice_text.setPlaceholderText('Recognized speech appears here...')
+        self._main_voice_text.setStyleSheet(f"""
+            QLineEdit {{
+                background: {BG_HOVER}; color: {TEXT_PRI}; border: 1px solid {BORDER};
+                border-radius: 6px; padding: 6px 8px; font-size: 11px;
+            }}
+        """)
+        status_lay.addWidget(self._main_voice_text)
         
         # Face auth indicator
         self._face_indicator = StatusIndicator('Face Authorized', ACTIVE)
@@ -3647,6 +3659,15 @@ class SystemPanel(QWidget):
             self._voice_indicator.set_active(True, command)
         else:
             self._voice_indicator.set_active(False, '—')
+        # Also update the compact full-text field on the main page (if present)
+        try:
+            text = command.strip() if command else ''
+            if not text:
+                text = '—'
+            self._main_voice_text.setText(text)
+            self._main_voice_text.setToolTip(text)
+        except Exception:
+            pass
     
     @pyqtSlot(bool, str)
     def _on_face_updated(self, authorized: bool, status: str) -> None:

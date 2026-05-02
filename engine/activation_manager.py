@@ -123,9 +123,24 @@ class ActivationManager:
 
         stable = self._stable_count >= self._stability_threshold
 
-        # ---- Handle None / no hand -------------------------------------
+        # ---- Handle None / no hand (preserve state, only cancel activation attempt) ----
         if gesture is None:
+            # If we're in the middle of activating (Open Palm countdown), cancel it when hand disappears
             if self._state == self.STATE_ACTIVATING:
+                self._state = self.STATE_INACTIVE
+                self._activation_start = None
+            # If already ACTIVE or already INACTIVE, preserve the state (hand leaving doesn't change it)
+            return False
+
+        # ---- Deactivation flow (check FIRST before activation) ----
+        # User must show Fist to explicitly turn OFF the system
+        if gesture == 'Fist':
+            if self._state == self.STATE_ACTIVE:
+                self._state = self.STATE_INACTIVE
+                self._last_triggered = None
+                print('✕ System DEACTIVATED')
+            elif self._state == self.STATE_ACTIVATING:
+                # If showing Fist during activation, cancel the activation countdown
                 self._state = self.STATE_INACTIVE
                 self._activation_start = None
             return False
@@ -144,17 +159,11 @@ class ActivationManager:
                     print('✓ System ACTIVATED')
             return False
 
-        # Open Palm gesture released — cancel activation countdown
+        # ---- Gesture released while activating ----
+        # If showing a different gesture during activation countdown, cancel activation
         if self._state == self.STATE_ACTIVATING:
             self._state = self.STATE_INACTIVE
             self._activation_start = None
-
-        # ---- Deactivation flow ----------------------------------------
-        if gesture == 'Fist' and self._state == self.STATE_ACTIVE:
-            self._state = self.STATE_INACTIVE
-            self._last_triggered = None
-            print('✕ System DEACTIVATED')
-            return False
 
         # ---- Action trigger -------------------------------------------
         if (
